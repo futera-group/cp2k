@@ -46,6 +46,9 @@ MODULE et_coupling_proj
                                               cp_print_key_unit_nr
    USE cp_realspace_grid_cube,          ONLY: cp_pw_to_cube
    USE dbcsr_api,                       ONLY: dbcsr_p_type
+   USE et_coupling_pod_types,           ONLY: et_pod,&
+                                              et_pod_atom,&
+                                              pod_data_release
    USE input_section_types,             ONLY: section_get_ivals,&
                                               section_get_lval,&
                                               section_vals_get,&
@@ -95,106 +98,9 @@ MODULE et_coupling_proj
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'et_coupling_proj'
 
-   ! Electronic-coupling calculation data structure
-   !
-   ! n_atoms      - number of atoms in the blocks
-   ! n_blocks     - number of atomic blocks (donor,acceptor,bridge,...)
-   ! fermi        - system Fermi level (alpha/beta spin component)
-   ! m_transf     - transformation matrix for basis-set orthogonalization (S^{-1/2})
-   ! m_transf_inv - inversion transformation matrix
-   ! block        - atomic data blocks
-   TYPE et_cpl
-      INTEGER                                            :: n_atoms
-      INTEGER                                            :: n_blocks
-      REAL(KIND=dp), DIMENSION(:), POINTER               :: fermi
-      TYPE(cp_fm_type), POINTER                          :: m_transf
-      TYPE(cp_fm_type), POINTER                          :: m_transf_inv
-      TYPE(et_cpl_block), DIMENSION(:), POINTER          :: block
-   END TYPE et_cpl
-
-   ! Electronic-coupling data block
-   !
-   ! n_atoms     - number of atoms
-   ! n_electrons - number of electrons
-   ! n_ao        - number of AO basis functions
-   ! atom        - list of atoms
-   ! mo          - electronic states
-   ! hab         - electronic-coupling elements
-   TYPE et_cpl_block
-      INTEGER                                            :: n_atoms
-      INTEGER                                            :: n_electrons
-      INTEGER                                            :: n_ao
-      TYPE(et_cpl_atom), DIMENSION(:), POINTER           :: atom
-      TYPE(mo_set_type), DIMENSION(:), POINTER         :: mo
-      TYPE(cp_fm_type), DIMENSION(:, :), POINTER        :: hab
-   END TYPE et_cpl_block
-
-   ! Electronic-coupling block-atom data
-   ! id     - atom ID
-   ! n_ao   - number of AO basis functions
-   ! ao_pos - position of atom in array of AO functions
-   TYPE et_cpl_atom
-      INTEGER                                            :: id
-      INTEGER                                            :: n_ao
-      INTEGER                                            :: ao_pos
-   END TYPE et_cpl_atom
-
    PUBLIC :: calc_et_coupling_proj
 
 CONTAINS
-
-! **************************************************************************************************
-!> \brief Release memory allocate for electronic coupling data structures
-!> \param ec electronic coupling data structure
-!> \author Z. Futera (02.2017)
-! **************************************************************************************************
-   SUBROUTINE release_ec_data(ec)
-
-      ! Routine arguments
-      TYPE(et_cpl), POINTER                              :: ec
-
-      INTEGER                                            :: i, j
-
-! Routine name for debug purposes
-
-      IF (ASSOCIATED(ec)) THEN
-
-         IF (ASSOCIATED(ec%fermi)) &
-            DEALLOCATE (ec%fermi)
-         IF (ASSOCIATED(ec%m_transf)) THEN
-            CALL cp_fm_release(matrix=ec%m_transf)
-            DEALLOCATE (ec%m_transf)
-            NULLIFY (ec%m_transf)
-         END IF
-         IF (ASSOCIATED(ec%m_transf_inv)) THEN
-            CALL cp_fm_release(matrix=ec%m_transf_inv)
-            DEALLOCATE (ec%m_transf_inv)
-            NULLIFY (ec%m_transf_inv)
-         END IF
-
-         IF (ASSOCIATED(ec%block)) THEN
-
-            DO i = 1, SIZE(ec%block)
-               IF (ASSOCIATED(ec%block(i)%atom)) &
-                  DEALLOCATE (ec%block(i)%atom)
-               IF (ASSOCIATED(ec%block(i)%mo)) THEN
-                  DO j = 1, SIZE(ec%block(i)%mo)
-                     CALL deallocate_mo_set(ec%block(i)%mo(j))
-                  END DO
-                  DEALLOCATE (ec%block(i)%mo)
-               END IF
-               CALL cp_fm_release(ec%block(i)%hab)
-            END DO
-
-            DEALLOCATE (ec%block)
-
-         END IF
-
-         DEALLOCATE (ec)
-
-      END IF
-
-   END SUBROUTINE release_ec_data
 
 ! **************************************************************************************************
 !> \brief check the electronic-coupling input section and set the atomic block data
@@ -208,7 +114,7 @@ CONTAINS
       ! Routine arguments
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(section_vals_type), POINTER                   :: et_proj_sec
-      TYPE(et_cpl), POINTER                              :: ec
+      TYPE(et_pod), POINTER                              :: ec
 
       INTEGER                                            :: i, j, k, l, n, n_ao, n_atoms, n_set
       INTEGER, DIMENSION(:), POINTER                     :: atom_id, atom_nf, atom_ps, n_shell, t
@@ -374,7 +280,7 @@ CONTAINS
    SUBROUTINE set_fermi(ec, fa, fb)
 
       ! Routine arguments
-      TYPE(et_cpl), POINTER                              :: ec
+      TYPE(et_pod), POINTER                              :: ec
       REAL(KIND=dp)                                      :: fa
       REAL(KIND=dp), OPTIONAL                            :: fb
 
@@ -469,7 +375,7 @@ CONTAINS
    SUBROUTINE reorder_hamiltonian_matrix(ec, mat_h, mat_w)
 
       ! Routine arguments
-      TYPE(et_cpl), POINTER                              :: ec
+      TYPE(et_pod), POINTER                              :: ec
       TYPE(cp_fm_type), INTENT(IN)                       :: mat_h
       TYPE(cp_fm_type), INTENT(IN)                       :: mat_w
 
@@ -610,7 +516,7 @@ CONTAINS
 
       ! Routine arguments
       TYPE(qs_environment_type), POINTER                 :: qs_env
-      TYPE(et_cpl), POINTER                              :: ec
+      TYPE(et_pod), POINTER                              :: ec
       TYPE(cp_fm_struct_type), POINTER                   :: fm_s
       TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:), &
          INTENT(OUT)                                     :: mat_t
@@ -666,7 +572,7 @@ CONTAINS
 
       ! Routine arguments
       TYPE(qs_environment_type), POINTER                 :: qs_env
-      TYPE(et_cpl), POINTER                              :: ec
+      TYPE(et_pod), POINTER                              :: ec
       TYPE(cp_fm_type), DIMENSION(:), INTENT(IN)         :: mat_h
 
       INTEGER                                            :: i, j, k, l, n_spins, spin
@@ -802,7 +708,7 @@ CONTAINS
    FUNCTION get_mo_c2_sum(blk_at, mo, id, atom) RESULT(c2)
 
       ! Routine arguments
-      TYPE(et_cpl_atom), DIMENSION(:), POINTER           :: blk_at
+      TYPE(et_pod_atom), DIMENSION(:), POINTER           :: blk_at
       TYPE(cp_fm_type), INTENT(IN)                       :: mo
       INTEGER, INTENT(IN)                                :: id
       INTEGER, DIMENSION(:), POINTER                     :: atom
@@ -887,7 +793,7 @@ CONTAINS
       ! Routine arguments
       INTEGER, INTENT(IN)                                :: output_unit
       TYPE(qs_environment_type), POINTER                 :: qs_env
-      TYPE(et_cpl), POINTER                              :: ec
+      TYPE(et_pod), POINTER                              :: ec
       INTEGER, INTENT(IN)                                :: blk, n_spins
 
       INTEGER                                            :: j, k, l, m, n, n_ao, n_mo
@@ -1093,7 +999,7 @@ CONTAINS
       TYPE(section_vals_type), POINTER                   :: ec_sec
       INTEGER, INTENT(IN)                                           :: output_unit
       TYPE(cp_logger_type), POINTER                      :: logger
-      TYPE(et_cpl), POINTER                              :: ec
+      TYPE(et_pod), POINTER                              :: ec
       TYPE(mo_set_type), DIMENSION(:), INTENT(IN)        :: mo
 
       ! Routine name for debug purposes
@@ -1336,7 +1242,7 @@ CONTAINS
 
       ! Routine arguments
       TYPE(qs_environment_type), POINTER                 :: qs_env
-      TYPE(et_cpl), POINTER                              :: ec
+      TYPE(et_pod), POINTER                              :: ec
       INTEGER, INTENT(IN)                                            :: id
       TYPE(mo_set_type), POINTER                         :: mo
       TYPE(cp_fm_type), INTENT(IN)                       :: mat_u
@@ -1444,7 +1350,7 @@ CONTAINS
 
       ! Routine arguments
       TYPE(qs_environment_type), POINTER                 :: qs_env
-      TYPE(et_cpl), POINTER                              :: ec
+      TYPE(et_pod), POINTER                              :: ec
       INTEGER, INTENT(IN)                                :: id, spin
       TYPE(cp_fm_type), INTENT(IN)                       :: mat_u
       REAL(KIND=dp), DIMENSION(:), POINTER               :: vec_e
@@ -1630,7 +1536,7 @@ CONTAINS
 
       ! Routine arguments
       TYPE(qs_environment_type), POINTER                 :: qs_env
-      TYPE(et_cpl), POINTER                              :: ec
+      TYPE(et_pod), POINTER                              :: ec
       INTEGER, INTENT(IN)                                :: n_spins
 
       INTEGER                                            :: i, j, k, l, n
@@ -1734,7 +1640,7 @@ CONTAINS
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: ks, mo_der
       TYPE(dft_control_type), POINTER                    :: dft_cntrl
-      TYPE(et_cpl), POINTER                              :: ec
+      TYPE(et_pod), POINTER                              :: ec
       TYPE(kpoint_type), POINTER                         :: kpoints
       TYPE(mo_set_type), DIMENSION(:), POINTER           :: mo
       TYPE(mp_para_env_type), POINTER                    :: para_env
@@ -1953,7 +1859,7 @@ CONTAINS
          END DO
          DEALLOCATE (mat_h)
       END IF
-      CALL release_ec_data(ec)
+      CALL pod_data_release(ec)
 
       ! Close output stream
       CALL cp_print_key_finished_output(output_unit, logger, et_proj_sec, 'PROGRAM_RUN_INFO')
