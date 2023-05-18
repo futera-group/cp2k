@@ -19,8 +19,8 @@ MODULE et_coupling_pod_read
                                               cp_fm_read_unformatted,&
                                               cp_fm_p_type,&
                                               cp_fm_type
-!   USE et_coupling_pod_core,            ONLY: pod_block_diag,&
-!                                              pod_block_hamiltonian
+   USE et_coupling_pod_core,            ONLY: pod_block_diag,&
+                                              pod_block_hamiltonian
    USE et_coupling_pod_types,           ONLY: et_pod
    USE et_coupling_pod_utils,           ONLY: pod_get_transf_mat
    USE kinds,                           ONLY: default_path_length,&
