@@ -34,9 +34,9 @@ MODULE et_coupling_pod
    USE dbcsr_api,                       ONLY: dbcsr_p_type
 !   USE et_coupling_pod_core,            ONLY: pod_block_diag,&
 !                                              pod_block_hamiltonian
-!   USE et_coupling_pod_print,           ONLY: pod_print_couplings,&
-!                                              pod_print_state_fracs,&
-!                                              pod_print_states
+   USE et_coupling_pod_print,           ONLY: pod_print_couplings,&
+                                              pod_print_state_fracs,&
+                                              pod_print_states
 !   USE et_coupling_pod_read,            ONLY: pod_read_restart_data
 !   USE et_coupling_pod_save,            ONLY: pod_save_state_cube
    USE et_coupling_pod_types,           ONLY: et_pod,&
