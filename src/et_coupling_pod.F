@@ -39,8 +39,8 @@ MODULE et_coupling_pod
 !   USE et_coupling_pod_save,            ONLY: pod_save_state_cube
    USE et_coupling_pod_types,           ONLY: et_pod,&
                                               pod_data_release
-!   USE et_coupling_pod_utils,           ONLY: pod_check_restart,&
-!                                              pod_get_transf_mat
+   USE et_coupling_pod_utils,           ONLY: pod_check_restart,&
+                                              pod_get_transf_mat
    USE input_section_types,             ONLY: section_vals_get_subs_vals,&
                                               section_vals_type
    USE kinds,                           ONLY: default_path_length,&
@@ -133,7 +133,7 @@ CONTAINS
 
       ! Restart from data files
       restart = pod_check_restart(logger, et_proj_sec, &
-                   file_tmf, file_tmr, file_hab, file_wfn, blocks_only)
+                                  file_tmf, file_tmr, file_hab, file_wfn, blocks_only)
 
       ! Parallel calculation - master thread
       master = .FALSE.
@@ -277,7 +277,7 @@ CONTAINS
          ELSE
      
             ! Lowdin transformation matrices
-            CALL pod_get_transf_mat(output_unit, qs_env, ec, fm_s, mat_w, n_ao)
+            CALL pod_get_transf_mat(qs_env, ec, mat_w)
             ! KS Hamiltonian
             CALL pod_block_hamiltonian(qs_env, ec, fm_s, mat_h, mat_w, n_ao, dft_cntrl%nspins)
             ! Block diagonization
@@ -332,7 +332,7 @@ CONTAINS
          ELSE
      
             ! Lowdin transformation matrices
-            CALL pod_get_transf_mat(output_unit, qs_env, ec, fm_s, mat_w, n_ao)
+            CALL pod_get_transf_mat(qs_env, ec, mat_w)
             ! KS Hamiltonian
             CALL pod_block_hamiltonian(qs_env, ec, fm_s, mat_h, mat_w, &
                                        n_ao, dft_cntrl%nspins)
