@@ -1,0 +1,380 @@
+!--------------------------------------------------------------------------------------------------!
+!   CP2K: A general program to perform molecular dynamics simulations                              !
+!   Copyright 2000-2023 CP2K developers group <https://cp2k.org>                                   !
+!                                                                                                  !
+!   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
+!--------------------------------------------------------------------------------------------------!
+
+! **************************************************************************************************
+!> \brief calculates the electron transfer coupling elements by projection-operator approach
+!>        Kondov et al. J.Phys.Chem.C 2007, 111, 11970-11981
+!> \author Z. Futera (02.2017)
+! **************************************************************************************************
+MODULE et_coupling_pod
+
+   USE bibliography,                    ONLY: Futera2017,&
+                                              cite_reference
+   USE cp_blacs_env,                    ONLY: cp_blacs_env_type
+   USE cp_control_types,                ONLY: dft_control_type
+   USE cp_fm_struct,                    ONLY: cp_fm_struct_create,&
+                                              cp_fm_struct_release,&
+                                              cp_fm_struct_type
+   USE cp_fm_types,                     ONLY: cp_fm_create,&
+                                              cp_fm_p_type,&
+                                              cp_fm_release,&
+                                              cp_fm_type
+   USE cp_log_handling,                 ONLY: cp_get_default_logger,&
+                                              cp_logger_type,&
+                                              cp_to_string
+   USE cp_output_handling,              ONLY: cp_print_key_finished_output,&
+                                              cp_print_key_unit_nr
+   USE dbcsr_api,                       ONLY: dbcsr_p_type
+   USE message_passing,                 ONLY: mp_para_env_type
+!   USE et_coupling_pod_core,            ONLY: pod_block_diag,&
+!                                              pod_block_hamiltonian
+!   USE et_coupling_pod_print,           ONLY: pod_print_couplings,&
+!                                              pod_print_state_fracs,&
+!                                              pod_print_states
+!   USE et_coupling_pod_read,            ONLY: pod_read_restart_data
+!   USE et_coupling_pod_save,            ONLY: pod_save_state_cube
+   USE et_coupling_pod_types,           ONLY: et_pod,&
+                                              pod_data_release
+!   USE et_coupling_pod_utils,           ONLY: pod_check_restart,&
+!                                              pod_get_transf_mat
+   USE input_section_types,             ONLY: section_vals_get_subs_vals,&
+                                              section_vals_type
+   USE kinds,                           ONLY: default_path_length,&
+                                              dp
+   USE kpoint_types,                    ONLY: kpoint_type
+   USE qs_environment_types,            ONLY: get_qs_env,&
+                                              qs_environment_type
+   USE qs_kind_types,                   ONLY: get_qs_kind_set,&
+                                              qs_kind_type
+   USE qs_mo_types,                     ONLY: mo_set_type
+   USE scf_control_types,               ONLY: scf_control_type
+#include "./base/base_uses.f90"
+
+   IMPLICIT NONE
+
+   PRIVATE
+
+   CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'et_coupling_proj'
+
+   PUBLIC :: pod_coupling_calc
+
+CONTAINS
+
+! **************************************************************************************************
+!> \brief calculates the electron transfer coupling elements by projection-operator approach
+!>        Kondov et al. J.Phys.Chem.C 2007, 111, 11970-11981
+!> \param qs_env QuickStep environment containing all system data
+!> \author Z. Futera (02.2017)
+! **************************************************************************************************
+   SUBROUTINE pod_coupling_calc(qs_env)
+
+      ! Routine arguments
+      TYPE(qs_environment_type), POINTER                 :: qs_env
+
+      ! Routine name for debug purposes
+      CHARACTER(len=*), PARAMETER :: routineN = 'pod_coupling_calc', &
+         routineP = moduleN//':'//routineN
+
+      ! Local variables
+      CHARACTER(LEN=default_path_length)                 :: file_hab, file_tmf, file_tmr, file_wfn
+      INTEGER                                            :: i, j, k, n_ao, n_atoms, output_unit, handle
+      LOGICAL                                            :: do_kp, master, restart, blocks_only
+      TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
+      TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: mat_h
+      TYPE(cp_fm_struct_type), POINTER                   :: fm_s
+      TYPE(cp_fm_type), POINTER                          :: mat_w
+      TYPE(cp_logger_type), POINTER                      :: logger
+      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: ks, mo_der
+      TYPE(dft_control_type), POINTER                    :: dft_cntrl
+      TYPE(et_pod), POINTER                              :: ec
+      TYPE(kpoint_type), POINTER                         :: kpoints
+      TYPE(mo_set_type), DIMENSION(:), POINTER           :: mo
+      TYPE(mp_para_env_type), POINTER                    :: para_env
+      TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
+      TYPE(scf_control_type), POINTER                    :: scf_control
+      TYPE(section_vals_type), POINTER                   :: et_proj_sec
+
+      ! Pointer initialization
+      NULLIFY (logger)
+
+      NULLIFY (blacs_env)
+      NULLIFY (para_env)
+      NULLIFY (dft_cntrl)
+      NULLIFY (kpoints)
+      NULLIFY (ks)
+      NULLIFY (mo)
+      NULLIFY (mo_der)
+      NULLIFY (qs_kind_set)
+      NULLIFY (et_proj_sec)
+
+      NULLIFY (fm_s)
+      NULLIFY (mat_h)
+      NULLIFY (mat_w)
+
+      NULLIFY (ec)
+
+      ! Time mark
+      CALL timeset(routineN, handle)
+
+      ! Reference
+      CALL cite_reference(Futera2017)
+
+      ! Stream for output to LOG file
+      logger => cp_get_default_logger()
+
+      et_proj_sec => section_vals_get_subs_vals(qs_env%input, 'PROPERTIES%ET_COUPLING%PROJECTION')
+
+      output_unit = cp_print_key_unit_nr(logger, et_proj_sec, &
+                                         'PROGRAM_RUN_INFO', extension='.log')
+
+      ! Restart from data files
+      restart = pod_check_restart(logger, et_proj_sec, &
+                   file_tmf, file_tmr, file_hab, file_wfn, blocks_only)
+
+      ! Parallel calculation - master thread
+      master = .FALSE.
+      IF (output_unit > 0) &
+         master = .TRUE.
+
+      ! Header
+      IF (master) THEN
+         WRITE (output_unit, '(/,T2,A)') &
+            '!-----------------------------------------------------------------------------!'
+         WRITE (output_unit, '(T17,A)') &
+            'Electronic coupling - Projection-operator method'
+      END IF
+
+      ! Main data structure
+      ALLOCATE (ec)
+      CPASSERT(ASSOCIATED(ec))
+      CALL pod_block_init(qs_env, et_proj_sec, ec)
+
+      ! Number of atoms and AO functions
+      CALL get_qs_env(qs_env, qs_kind_set=qs_kind_set, natom=n_atoms)
+      CALL get_qs_kind_set(qs_kind_set, nsgf=n_ao)
+
+      ! Print out info about system partitioning
+      IF (master) THEN
+
+         WRITE (output_unit, '(/,T3,A,I10)') &
+            'Number of atoms                    = ', n_atoms
+         WRITE (output_unit, '(T3,A,I10)') &
+            'Number of fragments                = ', ec%n_blocks
+         WRITE (output_unit, '(T3,A,I10)') &
+            'Number of fragment atoms           = ', ec%n_atoms
+         WRITE (output_unit, '(T3,A,I10)') &
+            'Number of unassigned atoms         = ', n_atoms - ec%n_atoms
+         WRITE (output_unit, '(T3,A,I10)') &
+            'Number of AO basis functions       = ', n_ao
+
+         DO i = 1, ec%n_blocks
+
+            WRITE (output_unit, '(/,T3,A,I0,A)') &
+               'Block ', i, ':'
+            WRITE (output_unit, '(T3,A,I10)') &
+               'Number of block atoms              = ', ec%block(i)%n_atoms
+            WRITE (output_unit, '(T3,A,I10)') &
+               'Number of block electrons          = ', ec%block(i)%n_electrons
+            WRITE (output_unit, '(T3,A,I10)') &
+               'Number of block AO functions       = ', ec%block(i)%n_ao
+
+            IF (ec%block(i)%n_atoms < 10) THEN
+
+               WRITE (output_unit, '(T3,A,10I6)') &
+                  'Block atom IDs                     =     ', &
+                  (ec%block(i)%atom(j)%id, j=1, ec%block(i)%n_atoms)
+
+            ELSE
+
+               WRITE (output_unit, '(T3,A)') 'Block atom IDs                     ='
+               DO j = 1, ec%block(i)%n_atoms/10
+                  WRITE (output_unit, '(T3,A,10I6)') '      ', &
+                     (ec%block(i)%atom((j - 1)*10 + k)%id, k=1, 10)
+               END DO
+               IF (MOD(ec%block(i)%n_atoms, 10) /= 0) THEN
+                  WRITE (output_unit, '(T3,A,10I6)') '      ', &
+                     (ec%block(i)%atom(k + 10*(ec%block(i)%n_atoms/10))%id, &
+                      k=1, MOD(ec%block(i)%n_atoms, 10))
+               END IF
+
+            END IF
+
+         END DO
+
+         IF (restart) THEN
+            WRITE (output_unit, '(/,T3,A)') &
+               'POD data are read from restart files'
+            IF (file_tmf /= '') &
+               WRITE (output_unit, '(T3,A,A)') &
+                  'Forward transformation matrix      = ', TRIM(ADJUSTL(file_tmf))
+            IF (file_tmr /= '') &
+               WRITE (output_unit, '(T3,A,A)') &
+                  'Reverse transformation matrix      = ', TRIM(ADJUSTL(file_tmr))
+            IF (file_hab /= '') &
+               WRITE (output_unit, '(T3,A,A)') &
+                  'Hamiltonian data file              = ', TRIM(ADJUSTL(file_hab))
+            IF (file_wfn /= '') &
+               WRITE (output_unit, '(T3,A,A)') &
+                  'Wavefunction data file             = ', TRIM(ADJUSTL(file_wfn))
+         END IF
+
+      END IF
+
+      ! Full matrix data structure
+      CALL get_qs_env(qs_env, para_env=para_env, blacs_env=blacs_env)
+      CALL cp_fm_struct_create(fmstruct=fm_s, para_env=para_env, context=blacs_env, &
+                               nrow_global=n_ao, ncol_global=n_ao)
+      CALL cp_fm_create(matrix=mat_w, matrix_struct=fm_s, name='FULL WORK MATRIX')
+
+      ! Spin polarization / K-point sampling
+      CALL get_qs_env(qs_env, dft_control=dft_cntrl, do_kpoints=do_kp)
+      CALL get_qs_env(qs_env, mos=mo, matrix_ks=ks, mo_derivs=mo_der, scf_control=scf_control)
+      CALL make_mo_eig(mo, dft_cntrl%nspins, ks, scf_control, mo_der)
+
+      IF (do_kp) THEN
+         CPABORT('ET_COUPLING not implemented with kpoints')
+      ELSE
+         !  no K-points
+         IF (master) &
+            WRITE (output_unit, '(T3,A)') 'No K-point sampling (Gamma point only)'
+      END IF
+
+      ! Spin polarized wavefunction
+      IF (dft_cntrl%nspins == 2) THEN
+
+         IF (master) &
+            WRITE (output_unit, '(/,T3,A)') 'Spin-polarized calculation'
+
+         !<--- Open shell / No K-points ------------------------------------------------>!
+     
+         ! State eneries of the whole system
+         IF (mo(1)%nao /= mo(2)%nao) &
+            CPABORT('different number of alpha/beta AO basis functions')
+         IF (master) THEN
+            WRITE (output_unit, '(/,T3,A,I10)') &
+               'Number of AO basis funtions        = ', mo(1)%nao
+            WRITE (output_unit, '(T3,A,I10)') &
+               'Number of alpha states             = ', mo(1)%nmo
+            WRITE (output_unit, '(T3,A,I10)') &
+               'Number of beta states              = ', mo(2)%nmo
+         END IF
+         CALL pod_print_states(output_unit, mo, dft_cntrl%nspins, 'the whole system', fermi=.TRUE.)
+         CALL pod_set_fermi(ec, mo(1)%mu, mo(2)%mu)
+     
+         ! Read data from files
+         IF (restart) THEN
+     
+            ! Hamiltonian & wavefunction
+            CALL pod_read_restart_data(output_unit, qs_env, ec, dft_cntrl%nspins, fm_s, &
+                                       mat_w, n_ao, file_tmf, file_tmr, file_hab, file_wfn, &
+                                       blocks_only)
+     
+         ! New calculation
+         ELSE
+     
+            ! Lowdin transformation matrices
+            CALL pod_get_transf_mat(output_unit, qs_env, ec, fm_s, mat_w, n_ao)
+            ! KS Hamiltonian
+            CALL pod_block_hamiltonian(qs_env, ec, fm_s, mat_h, mat_w, n_ao, dft_cntrl%nspins)
+            ! Block diagonization
+            CALL pod_block_diag(output_unit, qs_env, ec, mat_h, dft_cntrl%nspins, restart, &
+                                blocks_only)
+     
+         END IF
+     
+         ! Print out energies and couplings
+         DO i = 1, ec%n_blocks
+            IF (master) THEN
+               CALL pod_print_states(output_unit, ec%block(i)%mo, dft_cntrl%nspins, &
+                                     'block '//TRIM(ADJUSTL(cp_to_string(i)))//' states', &
+                                     mx_mo_a=mo(1)%nmo, mx_mo_b=mo(2)%nmo, fermi=.TRUE.)
+            END IF
+            CALL pod_print_state_fracs(output_unit, qs_env, ec, i, dft_cntrl%nspins)
+         END DO
+     
+         CALL pod_print_couplings(output_unit, qs_env, ec, mo(1)%nmo, mo(2)%nmo)
+     
+         ! Save electronic states
+         CALL pod_save_state_cube(qs_env, ec, dft_cntrl%nspins)
+     
+      ! Spin non-polarized wavefunction
+      ELSE
+
+          IF (master) &
+             WRITE (output_unit, '(/,T3,A)') 'Spin-restricted calculation'
+     
+         !<--- Closed shell / No K-points ---------------------------------------------->!
+     
+         ! State eneries of the whole system
+         CALL get_qs_env(qs_env, mos=mo)
+         IF (master) THEN
+            WRITE (output_unit, '(/,T3,A,I10)') &
+               'Number of AO basis funtions        = ', mo(1)%nao
+            WRITE (output_unit, '(T3,A,I10)') &
+               'Number of states                   = ', mo(1)%nmo
+         END IF
+         CALL pod_print_states(output_unit, mo, dft_cntrl%nspins, 'the whole system', fermi=.TRUE.)
+         CALL pod_set_fermi(ec, mo(1)%mu)
+     
+         ! Read data from files
+         IF (restart) THEN
+     
+            ! Hamiltonian & wavefunction
+            CALL pod_read_restart_data(output_unit, qs_env, ec, dft_cntrl%nspins, fm_s, &
+                                       mat_w, n_ao, file_tmf, file_tmr, file_hab, file_wfn, &
+                                       blocks_only)
+     
+         ! New calculation
+         ELSE
+     
+            ! Lowdin transformation matrices
+            CALL pod_get_transf_mat(output_unit, qs_env, ec, fm_s, mat_w, n_ao)
+            ! KS Hamiltonian
+            CALL pod_block_hamiltonian(qs_env, ec, fm_s, mat_h, mat_w, &
+                                       n_ao, dft_cntrl%nspins)
+            ! Block diagonization
+            CALL pod_block_diag(output_unit, qs_env, ec, mat_h, dft_cntrl%nspins, &
+                                restart, blocks_only)
+     
+         END IF
+     
+         ! Print out energies 
+         DO i = 1, ec%n_blocks
+            IF (ASSOCIATED(ec%block(i)%mo) .AND. master) THEN
+               CALL pod_print_states(output_unit, ec%block(i)%mo, dft_cntrl%nspins, &
+                                     'block '//TRIM(ADJUSTL(cp_to_string(i)))//' states', &
+                                     mx_mo_a=mo(1)%nmo, fermi=.TRUE.)
+            END IF
+            CALL pod_print_state_fracs(output_unit, qs_env, ec, i, dft_cntrl%nspins)
+         END DO
+     
+         ! Print out coupling elements
+         CALL pod_print_couplings(output_unit, qs_env, ec, mo(1)%nmo)
+     
+         ! Save electronic states
+         CALL pod_save_state_cube(qs_env, ec, dft_cntrl%nspins)
+     
+      END IF
+
+      ! Footer
+      IF (master) WRITE (output_unit, '(/,T2,A)') &
+         '!-----------------------------------------------------------------------------!'
+
+      ! Clean memory
+      CALL cp_fm_struct_release(fmstruct=fm_s)
+      CALL cp_fm_release(matrix=mat_w)
+      CALL pod_data_release(ec)
+
+      ! Close output stream
+      CALL cp_print_key_finished_output(output_unit, logger, et_proj_sec, 'PROGRAM_RUN_INFO')
+
+      ! Running time
+      CALL timestop(handle)
+
+   END SUBROUTINE pod_coupling_calc
+
+END MODULE et_coupling_pod
