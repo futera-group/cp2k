@@ -74,6 +74,43 @@ CONTAINS
 
 ! **************************************************************************************************
 !> \brief check the electronic-coupling input section and set the atomic block data
+!> \param ec electronic coupling data structure
+!> \param fa system Fermi level (alpha spin)
+!> \param fb system Fermi level (beta spin)
+!> \author Z. Futera (02.2017)
+! **************************************************************************************************
+   SUBROUTINE pod_set_fermi(ec, fa, fb)
+
+      ! Routine arguments
+      TYPE(et_pod), POINTER                              :: ec
+      REAL(KIND=dp)                                      :: fa
+      REAL(KIND=dp), OPTIONAL                            :: fb
+
+      ! Routine name for debug purposes
+      CHARACTER(len=*), PARAMETER :: routineN = 'pod_set_fermi', routineP = moduleN//':'//routineN
+
+
+      NULLIFY (ec%fermi)
+
+      IF (PRESENT(fb)) THEN
+
+         ALLOCATE (ec%fermi(2))
+         CPASSERT(ASSOCIATED(ec%fermi))
+         ec%fermi(1) = fa
+         ec%fermi(2) = fb
+
+      ELSE
+
+         ALLOCATE (ec%fermi(1))
+         CPASSERT(ASSOCIATED(ec%fermi))
+         ec%fermi(1) = fa
+
+      END IF
+
+   END SUBROUTINE pod_set_fermi
+
+! **************************************************************************************************
+!> \brief check the electronic-coupling input section and set the atomic block data
 !> \param qs_env QuickStep environment containing all system data
 !> \param et_proj_sec the electronic-coupling input section
 !> \param ec electronic coupling data structure
