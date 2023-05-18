@@ -37,7 +37,7 @@ MODULE et_coupling_pod
    USE et_coupling_pod_print,           ONLY: pod_print_couplings,&
                                               pod_print_state_fracs,&
                                               pod_print_states
-!   USE et_coupling_pod_read,            ONLY: pod_read_restart_data
+   USE et_coupling_pod_read,            ONLY: pod_read_restart_data
 !   USE et_coupling_pod_save,            ONLY: pod_save_state_cube
    USE et_coupling_pod_types,           ONLY: et_pod,&
                                               pod_data_release

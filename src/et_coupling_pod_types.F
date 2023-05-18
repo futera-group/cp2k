@@ -48,16 +48,18 @@ MODULE et_coupling_pod_types
 
    ! ET coupling POD block data structure
    !
-   ! n_atoms     - number of atoms
-   ! n_electrons - number of electrons
-   ! n_ao        - number of AO basis functions
-   ! atom        - list of atoms
-   ! mo          - electronic states
-   ! hab         - electronic-coupling elements
+   ! n_atoms      - number of atoms
+   ! n_electrons  - number of electrons
+   ! n_ao         - number of AO basis functions
+   ! n_hab_blocks - number of stored off-diagonal coupling blocks
+   ! atom         - list of atoms
+   ! mo           - electronic states
+   ! hab          - electronic-coupling elements
    TYPE et_pod_block
       INTEGER                                            :: n_atoms
       INTEGER                                            :: n_electrons
       INTEGER                                            :: n_ao
+      INTEGER                                            :: n_hab_blocks
       TYPE(et_pod_atom), DIMENSION(:), POINTER           :: atom
       TYPE(mo_set_type), DIMENSION(:), POINTER           :: mo
       TYPE(cp_fm_type), DIMENSION(:, :), POINTER         :: hab
