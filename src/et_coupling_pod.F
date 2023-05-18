@@ -12,6 +12,9 @@
 ! **************************************************************************************************
 MODULE et_coupling_pod
 
+   USE atomic_kind_types,               ONLY: get_atomic_kind
+   USE basis_set_types,                 ONLY: get_gto_basis_set,&
+                                              gto_basis_set_type
    USE bibliography,                    ONLY: Futera2017,&
                                               cite_reference
    USE cp_blacs_env,                    ONLY: cp_blacs_env_type
@@ -29,7 +32,6 @@ MODULE et_coupling_pod
    USE cp_output_handling,              ONLY: cp_print_key_finished_output,&
                                               cp_print_key_unit_nr
    USE dbcsr_api,                       ONLY: dbcsr_p_type
-   USE message_passing,                 ONLY: mp_para_env_type
 !   USE et_coupling_pod_core,            ONLY: pod_block_diag,&
 !                                              pod_block_hamiltonian
 !   USE et_coupling_pod_print,           ONLY: pod_print_couplings,&
@@ -41,14 +43,20 @@ MODULE et_coupling_pod
                                               pod_data_release
    USE et_coupling_pod_utils,           ONLY: pod_check_restart,&
                                               pod_get_transf_mat
-   USE input_section_types,             ONLY: section_vals_get_subs_vals,&
-                                              section_vals_type
+   USE input_section_types,             ONLY: section_vals_get,&
+                                              section_vals_get_subs_vals,&
+                                              section_vals_type,&
+                                              section_vals_val_get
    USE kinds,                           ONLY: default_path_length,&
                                               dp
    USE kpoint_types,                    ONLY: kpoint_type
+   USE message_passing,                 ONLY: mp_para_env_type
+   USE orbital_pointers,                ONLY: nso
+   USE particle_types,                  ONLY: particle_type
    USE qs_environment_types,            ONLY: get_qs_env,&
                                               qs_environment_type
-   USE qs_kind_types,                   ONLY: get_qs_kind_set,&
+   USE qs_kind_types,                   ONLY: get_qs_kind,&
+                                              get_qs_kind_set,&
                                               qs_kind_type
    USE qs_mo_types,                     ONLY: mo_set_type
    USE scf_control_types,               ONLY: scf_control_type
@@ -63,6 +71,179 @@ MODULE et_coupling_pod
    PUBLIC :: pod_coupling_calc
 
 CONTAINS
+
+! **************************************************************************************************
+!> \brief check the electronic-coupling input section and set the atomic block data
+!> \param qs_env QuickStep environment containing all system data
+!> \param et_proj_sec the electronic-coupling input section
+!> \param ec electronic coupling data structure
+!> \author Z. Futera (02.2017)
+! **************************************************************************************************
+   SUBROUTINE pod_block_init(qs_env, et_proj_sec, ec)
+
+      ! Routine arguments
+      TYPE(qs_environment_type), POINTER                 :: qs_env
+      TYPE(section_vals_type), POINTER                   :: et_proj_sec
+      TYPE(et_pod), POINTER                              :: ec
+
+      ! Routine name for debug purposes
+      CHARACTER(len=*), PARAMETER :: routineN = 'pod_block_init', routineP = moduleN//':'//routineN
+
+      ! Local variables
+      INTEGER                                            :: i, j, k, l, n, n_ao, n_atoms, n_set, handle
+      INTEGER, DIMENSION(:), POINTER                     :: atom_id, atom_nf, atom_ps, n_shell, t
+      INTEGER, DIMENSION(:, :), POINTER                  :: ang_mom_id
+      TYPE(gto_basis_set_type), POINTER                  :: ao_basis_set
+      TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
+      TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
+      TYPE(section_vals_type), POINTER                   :: block_sec
+
+      ! Time mark
+      CALL timeset(routineN, handle)
+
+      ! Initialization
+      NULLIFY (ang_mom_id)
+      NULLIFY (ao_basis_set)
+      NULLIFY (atom_id)
+      NULLIFY (atom_nf)
+      NULLIFY (atom_ps)
+      NULLIFY (block_sec)
+      NULLIFY (n_shell)
+      NULLIFY (particle_set)
+      NULLIFY (qs_kind_set)
+      NULLIFY (t)
+
+      ! Initialization
+      ec%n_atoms = 0
+      ec%n_blocks = 0
+      NULLIFY (ec%fermi)
+      NULLIFY (ec%m_transf)
+      NULLIFY (ec%m_transf_inv)
+      NULLIFY (ec%block)
+
+      ! Number of atoms / atom types
+      CALL get_qs_env(qs_env, particle_set=particle_set, qs_kind_set=qs_kind_set, natom=n_atoms)
+      ! Number of AO basis functions
+      CALL get_qs_kind_set(qs_kind_set, nsgf=n_ao)
+
+      ! Number of AO functions per atom
+      ALLOCATE (atom_nf(n_atoms))
+      IF (.NOT. ASSOCIATED(atom_nf)) &
+         CPABORT('Cannot allocate working "atom_nf" array. ')
+
+      atom_nf = 0
+      DO i = 1, n_atoms
+         CALL get_atomic_kind(particle_set(i)%atomic_kind, kind_number=j)
+         CALL get_qs_kind(qs_kind_set(j), basis_set=ao_basis_set)
+         IF (.NOT. ASSOCIATED(ao_basis_set)) &
+            CPABORT('Unsupported basis set type. ')
+         CALL get_gto_basis_set(gto_basis_set=ao_basis_set, &
+                                nset=n_set, nshell=n_shell, l=ang_mom_id)
+         DO j = 1, n_set
+            DO k = 1, n_shell(j)
+               atom_nf(i) = atom_nf(i) + nso(ang_mom_id(k, j))
+            END DO
+         END DO
+      END DO
+
+      ! Sanity check
+      n = 0
+      DO i = 1, n_atoms
+         n = n + atom_nf(i)
+      END DO
+      IF (n /= n_ao) &
+         CPABORT('Inconsistent number of atomic orbitals. ')
+
+      ! Atom position in AO array
+      ALLOCATE (atom_ps(n_atoms))
+      IF (.NOT. ASSOCIATED(atom_ps)) &
+         CPABORT('Cannot allocate working "atom_ps" array. ')
+      atom_ps = 1
+      DO i = 1, n_atoms - 1
+         atom_ps(i + 1) = atom_ps(i) + atom_nf(i)
+      END DO
+
+      ! Number of blocks
+      block_sec => section_vals_get_subs_vals(et_proj_sec, 'BLOCK')
+      CALL section_vals_get(block_sec, n_repetition=ec%n_blocks)
+      ALLOCATE (ec%block(ec%n_blocks))
+      IF (.NOT. ASSOCIATED(ec%block)) &
+         CPABORT('Cannot allocate memory for POD block data. ')
+
+      ! Block data
+      ALLOCATE (t(n_atoms))
+      IF (.NOT. ASSOCIATED(t)) &
+         CPABORT('Cannot allocate memory for working "t" array. ')
+
+      ec%n_atoms = 0
+      DO i = 1, ec%n_blocks
+
+         ! Initialization
+         ec%block(i)%n_atoms = 0
+         ec%block(i)%n_electrons = 0
+         ec%block(i)%n_ao = 0
+         NULLIFY (ec%block(i)%atom)
+         NULLIFY (ec%block(i)%mo)
+         NULLIFY (ec%block(i)%hab)
+
+         ! Number of electrons
+         CALL section_vals_val_get(block_sec, i_rep_section=i, &
+                                   keyword_name='NELECTRON', i_val=ec%block(i)%n_electrons)
+
+         ! User-defined atom array
+         CALL section_vals_val_get(block_sec, i_rep_section=i, &
+                                   keyword_name='ATOMS', i_vals=atom_id)
+
+         ! Count unique atoms
+         DO j = 1, SIZE(atom_id)
+            ! Check atom ID validity
+            IF (atom_id(j) < 1 .OR. atom_id(j) > n_atoms) &
+               CPABORT('invalid fragment atom ID ('//TRIM(ADJUSTL(cp_to_string(atom_id(j))))//')')
+            ! Check if the atom is not in previously-defined blocks
+            DO k = 1, i - 1
+               DO l = 1, ec%block(k)%n_atoms
+                  IF (ec%block(k)%atom(l)%id == atom_id(j)) &
+                     CPABORT('multiple assignment of atom'//TRIM(ADJUSTL(cp_to_string(atom_id(j)))))
+               END DO
+            END DO
+            ! Check if the atom is not duplicated in the present block
+            DO k = 1, ec%block(i)%n_atoms
+               IF (t(k) == atom_id(j)) &
+                  CPABORT('multiple assignment of atom'//TRIM(ADJUSTL(cp_to_string(atom_id(j)))))
+            END DO
+            ! Save the atom
+            ec%block(i)%n_atoms = ec%block(i)%n_atoms + 1
+            t(ec%block(i)%n_atoms) = atom_id(j)
+         END DO
+
+         ! Memory allocation
+         ALLOCATE (ec%block(i)%atom(ec%block(i)%n_atoms))
+         IF (.NOT. ASSOCIATED(ec%block(i)%atom)) &
+            CPABORT('Cannot allocate memory for atom IDs')
+
+         ! Save atom IDs and number of AOs
+         DO j = 1, ec%block(i)%n_atoms
+            ec%block(i)%atom(j)%id = t(j)
+            ec%block(i)%atom(j)%n_ao = atom_nf(ec%block(i)%atom(j)%id)
+            ec%block(i)%atom(j)%ao_pos = atom_ps(ec%block(i)%atom(j)%id)
+            ec%block(i)%n_ao = ec%block(i)%n_ao + ec%block(i)%atom(j)%n_ao
+         END DO
+
+         ec%n_atoms = ec%n_atoms + ec%block(i)%n_atoms
+      END DO
+
+      ! Clean memory
+      IF (ASSOCIATED(atom_nf)) &
+         DEALLOCATE (atom_nf)
+      IF (ASSOCIATED(atom_ps)) &
+         DEALLOCATE (atom_ps)
+      IF (ASSOCIATED(t)) &
+         DEALLOCATE (t)
+
+      ! Running time
+      CALL timestop(handle)
+
+   END SUBROUTINE pod_block_init
 
 ! **************************************************************************************************
 !> \brief calculates the electron transfer coupling elements by projection-operator approach
