@@ -477,7 +477,7 @@ CONTAINS
             CALL pod_print_state_fracs(output_unit, qs_env, ec, i, dft_cntrl%nspins)
          END DO
      
-         CALL pod_print_couplings(output_unit, qs_env, ec, mo(1)%nmo, mo(2)%nmo)
+         call pod_print_couplings(output_unit, logger, et_proj_sec, ec, mo)
      
          ! Save electronic states
          CALL pod_save_state_cube(qs_env, ec, dft_cntrl%nspins)
@@ -534,7 +534,7 @@ CONTAINS
          END DO
      
          ! Print out coupling elements
-         CALL pod_print_couplings(output_unit, qs_env, ec, mo(1)%nmo)
+         call pod_print_couplings(output_unit, logger, et_proj_sec, ec, mo)
      
          ! Save electronic states
          CALL pod_save_state_cube(qs_env, ec, dft_cntrl%nspins)

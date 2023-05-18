@@ -16,7 +16,7 @@ MODULE et_coupling_pod_print
    USE cp_output_handling,              ONLY: cp_p_file,&
                                               cp_print_key_should_output,&
                                               cp_print_key_unit_nr
-!   USE et_coupling_pod_mo,              ONLY: pod_mo_sum_c2
+   USE et_coupling_pod_mo,              ONLY: pod_mo_sum_c2
    USE et_coupling_pod_types,           ONLY: et_pod
    USE input_section_types,             ONLY: section_get_lval,&
                                               section_vals_get_subs_vals,&
