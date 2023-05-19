@@ -17,7 +17,6 @@ MODULE et_coupling_pod_core
                                               cp_fm_struct_release,&
                                               cp_fm_struct_type
    USE cp_fm_types,                     ONLY: cp_fm_create,&
-                                              cp_fm_p_type,&
                                               cp_fm_read_unformatted,&
                                               cp_fm_release,&
                                               cp_fm_to_fm,&
@@ -76,8 +75,8 @@ CONTAINS
 
       ! Routine arguments
       TYPE(et_pod), POINTER                              :: ec
-      TYPE(cp_fm_type), POINTER                          :: mat_h
-      TYPE(cp_fm_type), POINTER                          :: mat_w
+      TYPE(cp_fm_type), INTENT(IN)                       :: mat_h
+      TYPE(cp_fm_type)                                   :: mat_w
 
       ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_block_projection', &
@@ -188,8 +187,9 @@ CONTAINS
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(et_pod), POINTER                              :: ec
       TYPE(cp_fm_struct_type), POINTER                   :: fm_s
-      TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: mat_t
-      TYPE(cp_fm_type), POINTER                          :: mat_w
+      TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:), &
+                        INTENT(OUT)                      :: mat_t
+      TYPE(cp_fm_type)                                   :: mat_w
       INTEGER                                            :: n_ao, n_spins
 
       ! Routine name for debug purposes
@@ -208,7 +208,6 @@ CONTAINS
 
       ! Memory allocation
       ALLOCATE (mat_t(n_spins))
-      CPASSERT(ASSOCIATED(mat_t))
 
       ! KS Hamiltonian
       CALL get_qs_env(qs_env, matrix_ks=mat_h)
@@ -216,18 +215,18 @@ CONTAINS
       DO i = 1, n_spins
 
          ! Full-matrix format
-         CALL cp_fm_create(matrix=mat_t(i)%matrix, matrix_struct=fm_s, &
+         CALL cp_fm_create(matrix=mat_t(i), matrix_struct=fm_s, &
                            name='KS HAMILTONIAN IN SEPARATED ORTHOGONALIZED BASIS SET')
-         CALL copy_dbcsr_to_fm(mat_h(i)%matrix, mat_t(i)%matrix)
+         CALL copy_dbcsr_to_fm(mat_h(i)%matrix, mat_t(i))
 
          ! Transform KS Hamiltonian to the orthogonalized AO basis set
          CALL parallel_gemm("N", "N", n_ao, n_ao, n_ao, 1.0_dp, &
-                            ec%m_transf, mat_t(i)%matrix, 0.0_dp, mat_w)
+                            ec%m_transf, mat_t(i), 0.0_dp, mat_w)
          CALL parallel_gemm("N", "N", n_ao, n_ao, n_ao, 1.0_dp, &
-                            mat_w, ec%m_transf, 0.0_dp, mat_t(i)%matrix)
+                            mat_w, ec%m_transf, 0.0_dp, mat_t(i))
 
          ! Reorder KS Hamiltonian elements to defined block structure
-         CALL pod_block_projection(ec, mat_t(i)%matrix, mat_w)
+         CALL pod_block_projection(ec, mat_t(i), mat_w)
 
       END DO
 
@@ -253,7 +252,7 @@ CONTAINS
       INTEGER                                            :: output_unit
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(et_pod), POINTER                              :: ec
-      TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: mat_h
+      TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:)        :: mat_h
       INTEGER                                            :: n_spins
       LOGICAL                                            :: restart
       LOGICAL                                            :: blocks
@@ -268,25 +267,26 @@ CONTAINS
                                                             unit_wfn, unit_hbk, handle
       REAL(KIND=dp), DIMENSION(:), POINTER               :: vec_e
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
-      TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: dat
+      TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:)        :: dat
       TYPE(cp_fm_struct_type), POINTER                   :: fm_s
-      TYPE(cp_fm_type), POINTER                          :: mat_u
+      TYPE(cp_fm_type)                                   :: mat_u
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(mp_para_env_type), POINTER                    :: para_env
       TYPE(section_vals_type), POINTER                   :: block_sec, print_sec, print_key
+
+      print *,'DEBUG: pod_block_diag'
 
       ! Pointer initialization
       NULLIFY (vec_e)
       NULLIFY (blacs_env)
       NULLIFY (block_sec)
-      NULLIFY (dat)
       NULLIFY (fm_s)
       NULLIFY (logger)
-      NULLIFY (mat_u)
       NULLIFY (para_env)
       NULLIFY (print_sec)
 
       ! Time mark
+      print *,'DEBUG: --> call timeset'
       CALL timeset(routineN, handle)
 
       ! Settings
@@ -294,17 +294,22 @@ CONTAINS
       IF (blocks) THEN
 
          ! Log file
+         print *,'DEBUG: --> call cp_get_default_logger'
          logger => cp_get_default_logger()
          ! Input file
+         print *,'DEBUG: --> call section_vals_get_subs_vals'
          print_sec => section_vals_get_subs_vals(qs_env%input, &
                          'PROPERTIES%ET_COUPLING%PROJECTION%PRINT')
+         print *,'DEBUG: --> call section_vals_get_subs_vals'
          block_sec => section_vals_get_subs_vals(qs_env%input, &
                          'PROPERTIES%ET_COUPLING%PROJECTION%BLOCK')
 
          ! Check whether the POD blocks are available
          read_hdg = .TRUE.
+         print *,'DEBUG: --> call section_vals_get_subs_vals'
          print_key => section_vals_get_subs_vals(print_sec, 'HAMILTONIAN')
          DO i = 1, ec%n_blocks
+            print *,'DEBUG: --> call section_vals_val_get'
             CALL section_vals_val_get(block_sec, keyword_name='SKIP', l_val=skip_i, i_rep_section=i)
             IF (skip_i) THEN
                read_hdg = .FALSE.
@@ -312,6 +317,7 @@ CONTAINS
             ELSE
                DO j = 1, n_spins
                   WRITE (filename, '(A8,I1.1,A1,I1.1)') 'RESTART_', i, '_', j
+                  print *,'DEBUG: --> call cp_print_key_generate_filename'
                   file_hdg = cp_print_key_generate_filename(logger, print_key, middle_name=TRIM(filename), &
                                 extension='.hdg', my_local=.FALSE.)
                   INQUIRE (file=file_hdg, exist=ok)
@@ -328,6 +334,7 @@ CONTAINS
                DO j = i+1, ec%n_blocks
                   DO k = 1, n_spins
                      WRITE (filename, '(A8,I1.1,A1,I1.1,A1,I1.1)') 'RESTART_', i, '-', j, '_', k
+                     print *,'DEBUG: --> call cp_print_key_generate_filename'
                      file_hdg = cp_print_key_generate_filename(logger, print_key, middle_name=TRIM(filename), &
                                    extension='.hbk', my_local=.FALSE.)
                      INQUIRE (file=file_hdg, exist=ok)
@@ -343,22 +350,26 @@ CONTAINS
       END IF
 
       ! Parallel environment
+      print *,'DEBUG: --> call get_qs_env'
       CALL get_qs_env(qs_env, para_env=para_env, blacs_env=blacs_env)
 
       ! Storage for block sub-matrices
+      print *,'DEBUG: --> allocate dat'
       ALLOCATE (dat(ec%n_blocks))
-      CPASSERT(ASSOCIATED(dat))
 
       ! Storage for couplings and wavefunctions
       DO i = 1, ec%n_blocks
          ! Memory for states
          CPASSERT(.NOT. ASSOCIATED(ec%block(i)%mo))
+         print *,'DEBUG: --> allocate ec%block(i)%mo'
          ALLOCATE (ec%block(i)%mo(n_spins))
          CPASSERT(ASSOCIATED(ec%block(i)%mo))
          ! Memory for couplings
          ec%block(i)%n_hab_blocks = ec%n_blocks - i
+         print *,'DEBUG: --> n_hab_blocks = ',ec%block(i)%n_hab_blocks
          CPASSERT(.NOT. ASSOCIATED(ec%block(i)%hab))
          IF (ec%block(i)%n_hab_blocks > 0) THEN
+            print *,'DEBUG: --> allocate ec%block(i)%hab'
             ALLOCATE (ec%block(i)%hab(n_spins, ec%block(i)%n_hab_blocks))
             CPASSERT(ASSOCIATED(ec%block(i)%hab))
          END IF
@@ -366,7 +377,9 @@ CONTAINS
 
       ! Whole-system restart files - header
       IF (.NOT. blocks .OR. read_hdg) THEN
+         print *,'DEBUG: --> call pod_save_coupl_header'
          CALL pod_save_coupl_header(qs_env, ec, n_spins, unit_hab); 
+         print *,'DEBUG: --> call pod_save_state_header'
          CALL pod_save_state_header(qs_env, ec, n_spins, unit_wfn); 
       END IF
 
@@ -382,14 +395,16 @@ CONTAINS
             skip_calc = .FALSE.
 
             ! Memory allocation
+            print *,'DEBUG: --> call cp_fm_struct_create'
             CALL cp_fm_struct_create(fmstruct=fm_s, para_env=para_env, context=blacs_env, &
                                      nrow_global=ec%block(i)%n_ao, ncol_global=ec%block(i)%n_ao)
-            CALL cp_fm_create(matrix=dat(i)%matrix, matrix_struct=fm_s, &
-                              name='H_KS DIAGONAL BLOCK')
+            print *,'DEBUG: --> call cp_fm_create'
+            CALL cp_fm_create(matrix=dat(i), matrix_struct=fm_s, name='H_KS DIAGONAL BLOCK')
 
             ! Save block to file only
             IF (blocks) THEN
 
+               print *,'DEBUG: --> call section_vals_val_get'
                CALL section_vals_val_get(block_sec, keyword_name='SKIP', l_val=skip_i, i_rep_section=i)
 
                IF (.NOT. skip_i) THEN
@@ -410,24 +425,31 @@ CONTAINS
 
                         WRITE (filename, '(A8,I1.1,A1,I1.1)') 'RESTART_', i, '_', spin
       
+                        print *,'DEBUG: --> call cp_print_key_unit_nr'
                         unit_hbk = cp_print_key_unit_nr(logger, print_sec, 'HAMILTONIAN', &
                                       extension='.hdg', middle_name=TRIM(filename), file_form='UNFORMATTED', &
                                       file_position='REWIND', file_action='READ', log_filename=.FALSE.)
 
                         CPASSERT(.NOT. ASSOCIATED(vec_e))
+                        print *,'DEBUG: --> allocate vec_e'
                         ALLOCATE (vec_e(ec%block(i)%n_ao))
                         CPASSERT(ASSOCIATED(vec_e))
                         IF (unit_hbk > 0) THEN
                            READ (UNIT=unit_hbk) (vec_e(k), k=1, ec%block(i)%n_ao)
                         END IF
 
-                        CALL cp_fm_read_unformatted(dat(i)%matrix, unit_hbk)
+                        print *,'DEBUG: --> call cp_fm_read_unformatted'
+                        CALL cp_fm_read_unformatted(dat(i), unit_hbk)
 
-                        CALL pod_mo_set(qs_env, ec, i, spin, dat(i)%matrix, vec_e)
+                        print *,'DEBUG: --> call pod_mo_set'
+                        CALL pod_mo_set(qs_env, ec, i, spin, dat(i), vec_e)
 
+                        print *,'DEBUG: --> call pod_save_coupl_states'
                         CALL pod_save_coupl_states(ec, i, spin, unit_hab)
+                        print *,'DEBUG: --> call pod_save_state_coeffs'
                         CALL pod_save_state_coeffs(ec, i, spin, unit_wfn)
 
+                        print *,'DEBUG: --> deallocate vec_e'
                         IF (ASSOCIATED(vec_e)) &
                            DEALLOCATE (vec_e)
                         NULLIFY (vec_e)
@@ -441,10 +463,12 @@ CONTAINS
                            WRITE (output_unit, '(/,T3,A)') 'Reading Hamiltonian block '//&
                            TRIM(ADJUSTL(cp_to_string(i)))//' data from restart file'
                   
+                        print *,'DEBUG: --> call cp_print_key_unit_nr'
                         unit_hbk = cp_print_key_unit_nr(logger, print_sec, 'HAMILTONIAN', &
                                       extension='.hbk', middle_name=TRIM(filename), file_form='UNFORMATTED', &
                                       file_position='REWIND', file_action='READ', log_filename=.FALSE.)
-                        CALL cp_fm_read_unformatted(dat(i)%matrix, unit_hbk)
+                        print *,'DEBUG: --> call cp_fm_read_unformatted'
+                        CALL cp_fm_read_unformatted(dat(i), unit_hbk)
 
                      END IF
                
@@ -453,16 +477,20 @@ CONTAINS
 
                      skip_calc = .TRUE.
                
+                     print *,'DEBUG: --> call cp_print_key_unit_nr'
                      unit_hbk = cp_print_key_unit_nr(logger, print_sec, 'HAMILTONIAN', &
                                    extension='.hbk', middle_name=TRIM(filename), file_form='UNFORMATTED', &
                                    file_position='REWIND', file_action='WRITE', file_status='REPLACE', &
                                    log_filename=.FALSE.)
-                     CALL cp_fm_to_fm_submat(mat_h(spin)%matrix, dat(i)%matrix, ec%block(i)%n_ao, &
-                             ec%block(i)%n_ao, j, j, 1, 1)
-                     CALL cp_fm_write_unformatted(dat(i)%matrix, unit_hbk)
+                     print *,'DEBUG: --> call cp_fm_to_fm_submat'
+                     CALL cp_fm_to_fm_submat(mat_h(spin), dat(i), ec%block(i)%n_ao, &
+                                             ec%block(i)%n_ao, j, j, 1, 1)
+                     print *,'DEBUG: --> call cp_fm_write_unformatted'
+                     CALL cp_fm_write_unformatted(dat(i), unit_hbk)
                
                   END IF
                
+                  print *,'DEBUG: --> call cp_print_key_finished_output'
                   CALL cp_print_key_finished_output(unit_hbk, logger, print_sec, 'HAMILTONIAN')
 
                ELSE
@@ -478,25 +506,33 @@ CONTAINS
 
                ! Block elements
                IF (.NOT. blocks) THEN
-                  CALL cp_fm_to_fm_submat(mat_h(spin)%matrix, dat(i)%matrix, ec%block(i)%n_ao, &
-                          ec%block(i)%n_ao, j, j, 1, 1)
+                  print *,'DEBUG: --> call cp_fm_to_fm_submat'
+                  CALL cp_fm_to_fm_submat(mat_h(spin), dat(i), ec%block(i)%n_ao, &
+                                          ec%block(i)%n_ao, j, j, 1, 1)
                END IF
 
                ! Diagonalization
                CPASSERT(.NOT. ASSOCIATED(vec_e))
+               print *,'DEBUG: allocate vec_e'
                ALLOCATE (vec_e(ec%block(i)%n_ao))
                CPASSERT(ASSOCIATED(vec_e))
 
+               print *,'DEBUG: --> call cp_fm_create'
                CALL cp_fm_create(matrix=mat_u, matrix_struct=fm_s, name='UNITARY MATRIX')
-               CALL choose_eigv_solver(dat(i)%matrix, mat_u, vec_e)
-               CALL cp_fm_to_fm(mat_u, dat(i)%matrix)
+               print *,'DEBUG: --> call choose_eigv_solver'
+               CALL choose_eigv_solver(dat(i), mat_u, vec_e)
+               print *,'DEBUG: --> call cp_fm_to_fm'
+               CALL cp_fm_to_fm(mat_u, dat(i))
 
                ! Save state energies / vectors
+               print *,'DEBUG: --> call pod_mo_set'
                CALL pod_mo_set(qs_env, ec, i, spin, mat_u, vec_e)
 
                ! Save energies and MO coefficients to restart file
                IF (.NOT. blocks) THEN
+                  print *,'DEBUG: --> call pod_save_coupl_states'
                   CALL pod_save_coupl_states(ec, i, spin, unit_hab)
+                  print *,'DEBUG: --> call pod_save_state_coeffs'
                   CALL pod_save_state_coeffs(ec, i, spin, unit_wfn)
                ELSE
 
@@ -506,6 +542,7 @@ CONTAINS
 
                   WRITE (filename, '(A8,I1.1,A1,I1.1)') 'RESTART_', i, '_', spin
 
+                  print *,'DEBUG: --> call cp_print_key_unit_nr'
                   unit_hbk = cp_print_key_unit_nr(logger, print_sec, 'HAMILTONIAN', &
                                 extension='.hdg', middle_name=TRIM(filename), file_form='UNFORMATTED', &
                                 file_position='REWIND', file_action='WRITE', file_status='REPLACE', &
@@ -513,14 +550,17 @@ CONTAINS
                   IF (unit_hbk > 0) then
                      WRITE (UNIT=unit_hbk) (vec_e(k), k=1, ec%block(i)%n_ao)
                   END IF
+                  print *,'DEBUG: --> call cp_fm_write_unformatted'
                   CALL cp_fm_write_unformatted(mat_u, unit_hbk)
+                  print *,'DEBUG: --> call cp_print_key_finished_output'
                   CALL cp_print_key_finished_output(unit_hbk, logger, print_sec, 'HAMILTONIAN')
 
                END IF
 
                ! Clean memory
+               print *,'DEBUG: --> call cp_fm_release'
                CALL cp_fm_release(matrix=mat_u)
-               NULLIFY (mat_u)
+               print *,'DEBUG: --> deallocate vec_e'
                IF (ASSOCIATED(vec_e)) &
                   DEALLOCATE (vec_e)
                NULLIFY (vec_e)
@@ -528,6 +568,7 @@ CONTAINS
             END IF
 
             ! Clean memory
+            print *,'DEBUG: --> call cp_fm_struct_release'
             CALL cp_fm_struct_release(fmstruct=fm_s)
             NULLIFY (fm_s)
 
@@ -546,8 +587,10 @@ CONTAINS
                   IF (j > i) THEN
   
                      ! Memory allocation
+                     print *,'DEBUG: --> call cp_fm_struct_create'
                      CALL cp_fm_struct_create(fmstruct=fm_s, para_env=para_env, context=blacs_env, &
                                               nrow_global=ec%block(i)%n_ao, ncol_global=ec%block(j)%n_ao)
+                     print *,'DEBUG: --> call cp_fm_create'
                      CALL cp_fm_create(matrix=ec%block(i)%hab(spin, id), matrix_struct=fm_s, &
                                        name='H_KS OFF-DIAGONAL BLOCK')
   
@@ -558,19 +601,24 @@ CONTAINS
                         unit_hbk = cp_print_key_unit_nr(logger, print_sec, 'HAMILTONIAN', &
                                       extension='.hbk', middle_name=TRIM(filename), file_form='UNFORMATTED', &
                                       file_position='REWIND', file_action='READ', log_filename=.FALSE.)
+                        print *,'DEBUG: --> call cp_fm_read_unformatted'
                         CALL cp_fm_read_unformatted(ec%block(i)%hab(spin, id), unit_hbk)
+                        print *,'DEBUG: --> call cp_print_key_finished_output'
                         CALL cp_print_key_finished_output(unit_hbk, logger, print_sec, 'HAMILTONIAN')
 
                      ! Copy block data from Hamiltonian
                      ELSE
 
-                        CALL cp_fm_to_fm_submat(mat_h(spin)%matrix, ec%block(i)%hab(spin, id), &
+                        print *,'DEBUG: --> call cp_fm_to_fm_submat'
+                        CALL cp_fm_to_fm_submat(mat_h(spin), ec%block(i)%hab(spin, id), &
                                                 ec%block(i)%n_ao, ec%block(j)%n_ao, k, l, 1, 1)
 
                         ! Save block to file
                         IF (blocks) THEN
     
+                           print *,'DEBUG: --> call section_vals_val_get'
                            CALL section_vals_val_get(block_sec, keyword_name='SKIP', l_val=skip_i, i_rep_section=i)
+                           print *,'DEBUG: --> call section_vals_val_get'
                            CALL section_vals_val_get(block_sec, keyword_name='SKIP', l_val=skip_j, i_rep_section=j)
     
                            IF (.NOT. skip_i .AND. .NOT. skip_j) THEN
@@ -580,8 +628,11 @@ CONTAINS
                                             extension='.hbk', middle_name=TRIM(filename), file_form='UNFORMATTED', &
                                             file_position='REWIND', file_action='WRITE', file_status='REPLACE', &
                                             log_filename=.FALSE.)
+                              print *,'DEBUG: --> call cp_fm_write_unformatted'
                               CALL cp_fm_write_unformatted(ec%block(i)%hab(spin, id), unit_hbk)
+                              print *,'DEBUG: --> call cp_print_key_finished_output'
                               CALL cp_print_key_finished_output(unit_hbk, logger, print_sec, 'HAMILTONIAN')
+                              print *,'DEBUG: --> call cp_fm_release'
                               CALL cp_fm_release(matrix=ec%block(i)%hab(spin, id))
                            END IF
     
@@ -592,22 +643,27 @@ CONTAINS
                      ! Transformation
                      IF (.NOT. blocks .OR. read_hdg) THEN
  
+                        print *,'DEBUG: --> call cp_fm_create'
                         CALL cp_fm_create(matrix=mat_u, matrix_struct=fm_s, name='FULL WORK MATRIX')
+                        print *,'DEBUG: --> call parallel_gemm'
                         CALL parallel_gemm("T", "N", ec%block(i)%n_ao, ec%block(j)%n_ao, ec%block(i)%n_ao, &
-                                           1.0_dp, dat(i)%matrix, ec%block(i)%hab(spin, id), 0.0_dp, mat_u)
+                                           1.0_dp, dat(i), ec%block(i)%hab(spin, id), 0.0_dp, mat_u)
+                        print *,'DEBUG: --> call parallel_gemm'
                         CALL parallel_gemm("N", "N", ec%block(i)%n_ao, ec%block(j)%n_ao, ec%block(j)%n_ao, &
-                                           1.0_dp, mat_u, dat(j)%matrix, 0.0_dp, ec%block(i)%hab(spin, id))
+                                           1.0_dp, mat_u, dat(j), 0.0_dp, ec%block(i)%hab(spin, id))
  
                         ! Save coupling elements to binary data file
+                        print *,'DEBUG: --> call pod_save_coupl_elements'
                         CALL pod_save_coupl_elements(ec, i, id, spin, unit_hab); 
  
                         ! Clean memory
+                        print *,'DEBUG: --> call cp_fm_release'
                         CALL cp_fm_release(matrix=mat_u)
-                        NULLIFY (mat_u)
  
                      END IF
   
                      ! Clean memory
+                     print *,'DEBUG: --> call cp_fm_struct_release'
                      CALL cp_fm_struct_release(fmstruct=fm_s)
                      NULLIFY (fm_s)
   
@@ -623,37 +679,38 @@ CONTAINS
          END IF
 
          ! Clean memory
-         IF (ASSOCIATED(dat)) THEN
+         IF (ALLOCATED(dat)) THEN
             DO i = 1, SIZE(dat)
-               IF (ASSOCIATED(dat(i)%matrix)) THEN
-                  CALL cp_fm_release(matrix=dat(i)%matrix)
-                  NULLIFY (dat(i)%matrix)
-               END IF
+               print *,'DEBUG: --> call cp_fm_release'
+               CALL cp_fm_release(matrix=dat(i))
             END DO
          END IF
       END DO
 
-      ! Clean memory
-      IF (ASSOCIATED(dat)) &
+      print *,'DEBUG: --> deallocate dat'
+      IF (ALLOCATED(dat)) &
          DEALLOCATE (dat)
 
       ! Close output streams
       IF (.NOT. blocks .OR. read_hdg) THEN
+         print *,'DEBUG: --> call pod_save_coupl_close'
          CALL pod_save_coupl_close(qs_env, unit_hab)
+         print *,'DEBUG: --> call pod_save_state_close'
          CALL pod_save_state_close(qs_env, unit_wfn)
       END IF
 
       ! Clean memory
-      IF (ASSOCIATED(mat_h)) THEN
+      IF (ALLOCATED(mat_h)) THEN
          DO i = 1, SIZE(mat_h)
-            IF (ASSOCIATED(mat_h(i)%matrix)) &
-               CALL cp_fm_release(matrix=mat_h(i)%matrix)
+            print *,'DEBUG: --> call cp_fm_release'
+            CALL cp_fm_release(matrix=mat_h(i))
          END DO
-         IF (ASSOCIATED(mat_h)) &
-            DEALLOCATE (mat_h)
+         print *,'DEBUG: --> deallocate mat_h'
+         DEALLOCATE (mat_h)
       END IF
 
       ! Running time
+      print *,'DEBUG: --> call timestop'
       CALL timestop(handle)
 
    END SUBROUTINE pod_block_diag

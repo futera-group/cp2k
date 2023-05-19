@@ -1235,6 +1235,8 @@ CONTAINS
       TYPE(keyword_type), POINTER                        :: keyword
       TYPE(section_type), POINTER                        :: print_key, section_block, section_print
 
+      print *,'DEBUG: create_projection'
+
       ! Sanity check
       CPASSERT(.NOT. ASSOCIATED(section))
 
@@ -1245,11 +1247,13 @@ CONTAINS
       NULLIFY (section_print)
 
       ! PROJECTION (create)
+      print *,'DEBUG: --> PROJECTION'
       CALL section_create(section, __LOCATION__, name=TRIM(ADJUSTL(section_name)), &
                           description="Projection-operator approach fo ET coupling calculation", &
                           n_keywords=0, n_subsections=2, repeats=.FALSE.)
 
       ! PROJECTION -> RESTART
+      print *,'DEBUG: --> PROJECTION -> RESTART'
       CALL keyword_create(keyword, __LOCATION__, name='RESTART', &
                           description="Read POD Hamiltonian and MOs from restart files", &
                           usage="RESTART {logical}", default_l_val=.FALSE.)
@@ -1257,6 +1261,7 @@ CONTAINS
       CALL keyword_release(keyword)
 
       ! PROJECTION -> PROGRAM_RUN_INFO (create)
+      print *,'DEBUG: --> PROJECTION -> PROGRAM_RUN_INFO'
       CALL cp_print_key_section_create(print_key, __LOCATION__, name='PROGRAM_RUN_INFO', &
                                        description="Controls printing of data and informations to log file", &
                                        print_level=low_print_level, filename="__STD_OUT__")
@@ -1265,18 +1270,21 @@ CONTAINS
       CALL section_release(print_key)
 
       ! PROJECTION -> PRINT
+      print *,'DEBUG: --> PROJECTION -> PRINT'
       CALL section_create(section_print, __LOCATION__, name='PRINT', &
                           description="Data printing during POD coupling calculation", &
                           n_keywords=0, n_subsections=1, repeats=.FALSE.)
       CALL section_add_subsection(section, section_print)
 
       ! PROJECTION -> PRINT -> HAMILTONIAN
+      print *,'DEBUG: --> PROJECTION -> HAMILTONIAN'
       CALL cp_print_key_section_create(print_key, __LOCATION__, name='HAMILTONIAN', &
                                        description="Save elements of POD Hamiltonian to binary file", &
                                        filename="POD")
       CALL section_add_subsection(section_print, print_key)
 
       ! PROJECTION -> PRINT -> HAMILTONIAN -> BLOCKS_ONLY
+      print *,'DEBUG: --> PROJECTION -> PRINT -> HAMILTONIAN -> BLOCKS_ONLY'
       CALL keyword_create(keyword, __LOCATION__, name='BLOCKS_ONLY', &
                           description="Separate files for individual POD blocks", &
                           usage="BLOCKS_ONLY {logical}", default_l_val=.FALSE.)
@@ -1286,6 +1294,7 @@ CONTAINS
       CALL section_release(print_key)
 
       ! PROJECTION -> PRINT -> WAVEFUNCTION
+      print *,'DEBUG: --> PROJECTION -> PRINT -> WAVEFUNCTION'
       CALL cp_print_key_section_create(print_key, __LOCATION__, name='WAVEFUNCTION', &
                                        description="Save coefficients of POD orbitals to binary file", &
                                        filename="POD")
@@ -1293,6 +1302,7 @@ CONTAINS
       CALL section_release(print_key)
 
       ! PROJECTION -> PRINT -> TRANSF_MATRIX_F
+      print *,'DEBUG: --> PROJECTION -> PRINT -> TRANSF_MATRIX_F'
       CALL cp_print_key_section_create(print_key, __LOCATION__, name='TRANSF_MATRIX_F', &
                                        description="Save transformation matrix S^{-1/2} to binary file", &
                                        filename="POD")
@@ -1300,6 +1310,7 @@ CONTAINS
       CALL section_release(print_key)
 
       ! PROJECTION -> PRINT -> TRANSF_MATRIX_R
+      print *,'DEBUG: --> PROJECTION -> PRINT -> TRANSF_MATRIX_R'
       CALL cp_print_key_section_create(print_key, __LOCATION__, name='TRANSF_MATRIX_R', &
                                        description="Save transformation matrix S^{+1/2} to binary file", &
                                        filename="POD")
@@ -1307,21 +1318,31 @@ CONTAINS
       CALL section_release(print_key)
 
       ! PROJECTION -> PRINT -> COUPLING_ELEMENTS
+      print *,'DEBUG: --> PROJECTION -> PRINT -> COUPLING_ELEMENTS'
       CALL cp_print_key_section_create(print_key, __LOCATION__, name='COUPLING_ELEMENTS', &
                                        description="Print coupling elements to log file", &
                                        print_level=low_print_level)
+      ! PROJECTION -> PRINT -> COUPLING_ELEMENTS -> APPEND
+      CALL keyword_create(keyword, __LOCATION__, name="APPEND", &
+                          description="Append the files when they already exist", &
+                          default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+
       CALL section_add_subsection(section_print, print_key)
       CALL section_release(print_key)
 
       CALL section_release(section_print)
 
       ! PROJECTION -> BLOCK
+      print *,'DEBUG: --> PROJECTION -> BLOCK'
       CALL section_create(section_block, __LOCATION__, name='BLOCK', &
                           description="Part of the system (donor, acceptor, bridge,...)", &
                           n_keywords=2, n_subsections=1, repeats=.TRUE.)
       CALL section_add_subsection(section, section_block)
 
       ! PROJECTION -> BLOCK -> ATOMS
+      print *,'DEBUG: --> PROJECTION -> BLOCK -> ATOMS'
       CALL keyword_create(keyword, __LOCATION__, name='ATOMS', &
                           description="Array of atom IDs in the system part", &
                           usage="ATOMS {integer} {integer} .. {integer}", &
@@ -1330,6 +1351,7 @@ CONTAINS
       CALL keyword_release(keyword)
 
       ! PROJECTION -> BLOCK -> NELECTRON
+      print *,'DEBUG: --> PROJECTION -> BLOCK -> NELECTRON'
       CALL keyword_create(keyword, __LOCATION__, name='NELECTRON', &
                           description="Number of electrons expected in the system part", &
                           usage="NELECTRON {integer}", default_i_val=0)
@@ -1337,6 +1359,7 @@ CONTAINS
       CALL keyword_release(keyword)
 
       ! PROJECTION -> BLOCK -> SKIP
+      print *,'DEBUG: --> PROJECTION -> BLOCK -> SKIP'
       CALL keyword_create(keyword, __LOCATION__, name='SKIP', &
                           description="Skip operations related to indivial POD block", &
                           usage="SKIP {logical}", default_l_val=.FALSE.)
@@ -1344,12 +1367,14 @@ CONTAINS
       CALL keyword_release(keyword)
 
       ! PROJECTION -> BLOCK -> PRINT
+      print *,'DEBUG: --> PROJECTION -> BLOCK -> PRINT'
       CALL section_create(section_print, __LOCATION__, name='PRINT', &
                           description="Possible printing options in ET system part", &
                           n_keywords=0, n_subsections=0, repeats=.FALSE.)
       CALL section_add_subsection(section_block, section_print)
 
       ! PROJECTION -> BLOCK -> PRINT -> MO_COEFF_ATOM
+      print *,'DEBUG: --> PROJECTION -> BLOCK -> PRINT -> MO_COEFF_ATOM'
       CALL keyword_create(keyword, __LOCATION__, name='MO_COEFF_ATOM', &
                           description="Print out MO coeffiecients on given atom", &
                           usage="MO_COEFF_ATOM {integer} {integer} .. {integer}", &
@@ -1358,6 +1383,7 @@ CONTAINS
       CALL keyword_release(keyword)
 
       ! PROJECTION -> BLOCK -> PRINT -> MO_COEFF_ATOM_STATE
+      print *,'DEBUG: --> PROJECTION -> BLOCK -> PRINT -> MO_COEFF_ATOM_STATE'
       CALL keyword_create(keyword, __LOCATION__, name='MO_COEFF_ATOM_STATE', &
                           description="Print out MO coeffiecients of specific state", &
                           usage="MO_COEFF_ATOM_STATE {integer} {integer} .. {integer}", &
@@ -1366,11 +1392,13 @@ CONTAINS
       CALL keyword_release(keyword)
 
       ! PROJECTION -> BLOCK -> PRINT -> MO_CUBES
+      print *,'DEBUG: --> PROJECTION -> BLOCK -> PRINT -> MO_CUBES'
       CALL cp_print_key_section_create(print_key, __LOCATION__, name='MO_CUBES', &
                                        description="Controls saving of MO cube files", &
                                        print_level=high_print_level, filename="")
 
       ! PROJECTION -> BLOCK -> PRINT -> MO_CUBES -> STRIDE
+      print *,'DEBUG: --> PROJECTION -> BLOCK -> PRINT -> MO_CUBES -> STRIDE'
       CALL keyword_create(keyword, __LOCATION__, name='STRIDE', &
                           description="The stride (X,Y,Z) used to write the cube file", &
                           usage="STRIDE {integer} {integer} {integer}", n_var=-1, &
@@ -1379,6 +1407,7 @@ CONTAINS
       CALL keyword_release(keyword)
 
       ! PROJECTION -> BLOCK -> PRINT -> MO_CUBES -> MO_LIST
+      print *,'DEBUG: --> PROJECTION -> BLOCK -> PRINT -> MO_CUBES -> MO_LIST'
       CALL keyword_create(keyword, __LOCATION__, name='MO_LIST', &
                           description="Indices of molecular orbitals to save", &
                           usage="MO_LIST {integer} {integer} .. {integer}", &
@@ -1387,6 +1416,7 @@ CONTAINS
       CALL keyword_release(keyword)
 
       ! PROJECTION -> BLOCK -> PRINT -> MO_CUBES -> NLUMO
+      print *,'DEBUG: --> PROJECTION -> BLOCK -> PRINT -> MO_CUBES -> NLUMO'
       CALL keyword_create(keyword, __LOCATION__, name='NLUMO', &
                           description="Number of unoccupied molecular orbitals to save", &
                           usage="NLUMO {integer}", default_i_val=1)
@@ -1394,6 +1424,7 @@ CONTAINS
       CALL keyword_release(keyword)
 
       ! PROJECTION -> BLOCK -> PRINT -> MO_CUBES -> NHOMO
+      print *,'DEBUG: --> PROJECTION -> BLOCK -> PRINT -> MO_CUBES -> NHOMO'
       CALL keyword_create(keyword, __LOCATION__, name='NHOMO', &
                           description="Number of occupied molecular orbitals to save", &
                           usage="NHOMO {integer}", default_i_val=1)
@@ -1401,9 +1432,12 @@ CONTAINS
       CALL keyword_release(keyword)
 
       CALL section_add_subsection(section_print, print_key)
+      print *,'DEBUG: --> release print_key'
       CALL section_release(print_key)
 
+      print *,'DEBUG: --> release section_print'
       CALL section_release(section_print)
+      print *,'DEBUG: --> release section_block'
       CALL section_release(section_block)
 
    END SUBROUTINE create_projection

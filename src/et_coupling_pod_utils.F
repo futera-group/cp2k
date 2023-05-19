@@ -11,7 +11,8 @@ MODULE et_coupling_pod_utils
 
    USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm
    USE cp_fm_diag,                      ONLY: cp_fm_power
-   USE cp_fm_types,                     ONLY: cp_fm_type
+   USE cp_fm_types,                     ONLY: cp_fm_create,&
+                                              cp_fm_type
    USE cp_log_handling,                 ONLY: cp_logger_type
    USE cp_output_handling,              ONLY: cp_print_key_generate_filename
    USE dbcsr_api,                       ONLY: dbcsr_p_type
@@ -49,7 +50,7 @@ CONTAINS
       ! Routine arguments
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(et_pod), POINTER                              :: ec
-      TYPE(cp_fm_type), POINTER                          :: mat_w
+      TYPE(cp_fm_type)                                   :: mat_w
 
       ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_get_transf_mat', &
@@ -60,6 +61,8 @@ CONTAINS
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: mat_s
       TYPE(scf_control_type), POINTER                    :: scf_cntrl
 
+      print *,'DEBUG: pod_get_transf_mat'
+
       ! Time mark
       CALL timeset(routineN, handle)
 
@@ -67,13 +70,40 @@ CONTAINS
       NULLIFY (mat_s)
       NULLIFY (scf_cntrl)
 
-      CALL get_qs_env(qs_env, matrix_s=mat_s)
-      CALL copy_dbcsr_to_fm(mat_s(1)%matrix, ec%m_transf)
-      CALL copy_dbcsr_to_fm(mat_s(1)%matrix, ec%m_transf_inv)
+      print *,'DEBUG: --> call get_qs_env'
+      CALL get_qs_env(qs_env, matrix_s=mat_s, scf_control=scf_cntrl)
 
       ! Transformation S -> S^{-1/2}
-      CALL get_qs_env(qs_env, scf_control=scf_cntrl)
+      CPASSERT(.NOT. ASSOCIATED(ec%m_transf))
+      print *,'DEBUG: --> allocate m_transf'
+      ALLOCATE (ec%m_transf)
+      CPASSERT(ASSOCIATED(ec%m_transf))
+      print *,'DEBUG: --> call cp_fm_create'
+      CALL cp_fm_create(matrix=ec%m_transf, matrix_struct=mat_w%matrix_struct, &
+                        name='S^(-1/2) TRANSFORMATION MATRIX')
+      print *,'DEBUG: --> call copy_dbcsr_to_fm'
+      CALL copy_dbcsr_to_fm(mat_s(1)%matrix, ec%m_transf)
+      print *,'DEBUG: --> call cp_fm_power'
       CALL cp_fm_power(ec%m_transf, mat_w, -0.5_dp, scf_cntrl%eps_eigval, n_deps)
+
+      ! Sanity check
+      IF (n_deps /= 0) THEN
+         CALL cp_warn(__LOCATION__, &
+                      "Overlap matrix exhibits linear dependencies. At least some "// &
+                      "eigenvalues have been quenched.")
+      END IF
+
+      ! Transformation S -> S^{+1/2}
+      CPASSERT(.NOT. ASSOCIATED(ec%m_transf_inv))
+      print *,'DEBUG: --> allocate m_transf_inv'
+      ALLOCATE (ec%m_transf_inv)
+      CPASSERT(ASSOCIATED(ec%m_transf_inv))
+      print *,'DEBUG: --> call cp_fm_create'
+      CALL cp_fm_create(matrix=ec%m_transf_inv, matrix_struct=mat_w%matrix_struct, &
+                       name='S^(+1/2) TRANSFORMATION MATRIX')
+      print *,'DEBUG: --> call copy_dbcsr_to_fm'
+      CALL copy_dbcsr_to_fm(mat_s(1)%matrix, ec%m_transf_inv)
+      print *,'DEBUG: --> call cp_fm_power'
       CALL cp_fm_power(ec%m_transf_inv, mat_w, +0.5_dp, scf_cntrl%eps_eigval, n_deps)
 
       ! Sanity check

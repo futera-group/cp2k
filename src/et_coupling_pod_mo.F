@@ -99,53 +99,69 @@ CONTAINS
       REAL(KIND=dp), DIMENSION(:), POINTER               :: vec_t
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_struct_type), POINTER                   :: fm_s
-      TYPE(cp_fm_type), POINTER                          :: mat_sc, mat_t
+      TYPE(cp_fm_type)                                   :: mat_sc, mat_t
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: mat_s
       TYPE(mp_para_env_type), POINTER                    :: para_env
+
+      print *,'DEBUG: pod_mo_norm'
+
+      ! Time mark
+      print *,'DEBUG: --> call timeset'
+      CALL timeset(routineN, handle)
 
       ! Initialization
       NULLIFY (blacs_env)
       NULLIFY (para_env)
       NULLIFY (fm_s)
       NULLIFY (mat_s)
-      NULLIFY (mat_sc)
-      NULLIFY (mat_t)
       NULLIFY (vec_t)
 
-      ! Time mark
-      CALL timeset(routineN, handle)
-
       ! Overlap matrix
+      print *,'DEBUG: --> call get_qs_env'
       CALL get_qs_env(qs_env, matrix_s=mat_s)
 
       ! Calculate S*C product
+      print *,'DEBUG: --> call cp_fm_create'
       CALL cp_fm_create(matrix=mat_sc, matrix_struct=mo%mo_coeff%matrix_struct, &
                         name='S*C PRODUCT MATRIX')
+      print *,'DEBUG: --> call cp_dbcsr_sm_fm_multiply'
       CALL cp_dbcsr_sm_fm_multiply(mat_s(1)%matrix, mo%mo_coeff, mat_sc, n_mo)
 
       ! Calculate C^T*S*C
+      print *,'DEBUG: --> call get_qs_env'
       CALL get_qs_env(qs_env, para_env=para_env, blacs_env=blacs_env)
+      print *,'DEBUG: --> call cp_fm_struct_create'
       CALL cp_fm_struct_create(fmstruct=fm_s, para_env=para_env, context=blacs_env, &
                                nrow_global=n_mo, ncol_global=n_mo)
+      print *,'DEBUG: --> call cp_fm_create'
       CALL cp_fm_create(matrix=mat_t, matrix_struct=fm_s, &
                         name='C^T*S*C OVERLAP PRODUCT MATRIX')
+      print *,'DEBUG: --> call parallel_gemm'
       CALL parallel_gemm('T', 'N', n_mo, n_mo, n_ao, 1.0_dp, mo%mo_coeff, mat_sc, 0.0_dp, mat_t)
 
       ! Normalization
+      print *,'DEBUG: --> allocate vec_t'
       ALLOCATE (vec_t(n_mo))
       CPASSERT(ASSOCIATED(vec_t))
+      print *,'DEBUG: --> call cp_fm_vectorssum'
       CALL cp_fm_vectorssum(mat_t, vec_t)
       vec_t = 1.0_dp/DSQRT(vec_t)
+      print *,'DEBUG: --> call cp_fm_column_scale'
       CALL cp_fm_column_scale(mo%mo_coeff, vec_t)
 
       ! Clean memory
+      print *,'DEBUG: --> call cp_fm_struct_release'
       CALL cp_fm_struct_release(fmstruct=fm_s)
+      print *,'DEBUG: --> call cp_fm_release'
       CALL cp_fm_release(matrix=mat_sc)
+      print *,'DEBUG: --> call cp_fm_release'
       CALL cp_fm_release(matrix=mat_t)
+      print *,'DEBUG: --> dealllocate vec_t'
       IF (ASSOCIATED(vec_t)) &
          DEALLOCATE (vec_t)
 
       ! Running time
+      print *,'DEBUG: --> call timestop'
       CALL timestop(handle)
 
    END SUBROUTINE pod_mo_norm
@@ -168,11 +184,11 @@ CONTAINS
       ! Routine arguments
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(et_pod), POINTER                              :: ec
-      INTEGER                                            :: id
+      INTEGER, INTENT(IN)                                :: id
       TYPE(mo_set_type), POINTER                         :: mo
-      TYPE(cp_fm_type), POINTER                          :: mat_u
-      INTEGER                                            :: n_ao
-      INTEGER                                            :: n_mo
+      TYPE(cp_fm_type), INTENT(IN)                       :: mat_u
+      INTEGER, INTENT(IN)                                :: n_ao
+      INTEGER, INTENT(IN)                                :: n_mo
 
       ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_mo_set_coeffs', &
@@ -191,7 +207,10 @@ CONTAINS
       REAL(KIND=dp)                                      :: xu
 #endif
 
+      print *,'DEBUG: pod_mo_set_coeffs'
+
       ! Time mark
+      print *,'DEBUG: --> call timeset'
       CALL timeset(routineN, handle)
 
 #if defined(__SCALAPACK)
@@ -212,8 +231,10 @@ CONTAINS
       NULLIFY (para_env)
 
       ! Working matrix
+      print *,'DEBUG: --> call cp_fm_create'
       CALL cp_fm_create(matrix=mat_w, matrix_struct=mo%mo_coeff%matrix_struct, &
                         name='BLOCK MO-TRANSFORMATION WORKING MATRIX')
+      print *,'DEBUG: --> call cp_fm_set_all'
       CALL cp_fm_set_all(mat_w, 0.0_dp)
 
       ! Matrix-element reordering
@@ -226,10 +247,12 @@ CONTAINS
             DO ic = 1, ec%block(id)%n_atoms
                DO jc = 1, ec%block(id)%atom(ic)%n_ao
 #if defined(__SCALAPACK)
+                  print *,'DEBUG: --> call infog2l'
                   CALL infog2l(ec%block(id)%atom(ir)%ao_pos + jr - 1, nc, &
                                mat_w%matrix_struct%descriptor, &
                                ns_p_rows, ns_p_cols, cs_row, cs_col, &
                                is_p_row, is_p_col, cs_row_f, cs_col_f)
+                  print *,'DEBUG: --> call infog2l'
                   CALL infog2l(nr, nc, mat_u%matrix_struct%descriptor, &
                                nu_p_rows, nu_p_cols, cu_row, cu_col, &
                                iu_p_row, iu_p_col, cu_row_f, cu_col_f)
@@ -260,13 +283,17 @@ CONTAINS
       END DO
 
       ! Transformation to original non-orthogonal basis set
+      print *,'DEBUG: --> call parallel_gemm'
       CALL parallel_gemm("N", "N", n_ao, n_mo, n_ao, 1.0_dp, ec%m_transf, mat_w, 0.0_dp, mo%mo_coeff)
+      print *,'DEBUG: --> call pod_mo_norm'
       CALL pod_mo_norm(qs_env, mo, n_ao, n_mo)
 
       ! Clean memory
+      print *,'DEBUG: --> call cp_fm_release'
       CALL cp_fm_release(matrix=mat_w)
 
       ! Running time
+      print *,'DEBUG: --> call timestop'
       CALL timestop(handle)
 
    END SUBROUTINE pod_mo_set_coeffs
@@ -286,8 +313,8 @@ CONTAINS
       ! Routine arguments
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(et_pod), POINTER                              :: ec
-      INTEGER                                            :: id, spin
-      TYPE(cp_fm_type), POINTER                          :: mat_u
+      INTEGER, INTENT(IN)                                :: id, spin
+      TYPE(cp_fm_type), INTENT(IN)                       :: mat_u
       REAL(KIND=dp), DIMENSION(:), POINTER               :: vec_e
 
       ! Routine name for debug purposes
@@ -304,6 +331,8 @@ CONTAINS
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(scf_control_type), POINTER                    :: scf_cntrl
 
+      print *,'DEBUG: pod_mo_set'
+
       ! Pointer initialization
       NULLIFY (blacs_env)
       NULLIFY (fm_s)
@@ -314,10 +343,13 @@ CONTAINS
       NULLIFY (scf_cntrl)
 
       ! Time mark
+      print *,'DEBUG: --> call timeset'
       CALL timeset(routineN, handle)
 
       ! Number of basis functions
+      print *,'DEBUG: --> call get_qs_env'
       CALL get_qs_env(qs_env, qs_kind_set=qs_kind_set)
+      print *,'DEBUG: --> call get_qs_kind_set'
       CALL get_qs_kind_set(qs_kind_set, nsgf=n_ao)
 
       ! Number of states
@@ -328,10 +360,12 @@ CONTAINS
          CPABORT('inconsistent number of states / energies')
 
       ! Maximal occupancy
+      print *,'DEBUG: --> call get_qs_env'
       CALL get_qs_env(qs_env, dft_control=dft_cntrl)
       mx_occ = 2.0_dp
       IF (dft_cntrl%nspins > 1) &
          mx_occ = 1.0_dp
+      print *,'DEBUG: --> mx_occ = ',mx_occ
 
       ! Number of electrons
       n_el = ec%block(id)%n_electrons
@@ -342,42 +376,60 @@ CONTAINS
                n_el = n_el + 1
          END IF
       END IF
+      print *,'DEBUG: --> n_el = ',n_el
 
       ! Memory allocation
+      print *,'DEBUG: --> call deallocate_mo_set'
       CALL deallocate_mo_set(ec%block(id)%mo(spin))
+      print *,'DEBUG: --> call allocate_mo_set'
       CALL allocate_mo_set(ec%block(id)%mo(spin), n_ao, n_mo, n_el, REAL(n_el, dp), mx_occ, 0.0_dp)
       mo => ec%block(id)%mo(spin)
 
       ! State energies
       NULLIFY (mo%eigenvalues)
+      print *,'DEBUG: --> allocate mo%eigenvalues'
       ALLOCATE (mo%eigenvalues(n_mo))
       CPASSERT(ASSOCIATED(mo%eigenvalues))
+      print *,'DEBUG: --> set mo%eigenvalues'
       mo%eigenvalues = vec_e
 
       ! States coefficients
+      print *,'DEBUG: --> call get_qs_env'
       CALL get_qs_env(qs_env, para_env=para_env, blacs_env=blacs_env)
+      print *,'DEBUG: --> call cp_fm_struct_create'
       CALL cp_fm_struct_create(fmstruct=fm_s, para_env=para_env, context=blacs_env, &
                                nrow_global=n_ao, ncol_global=n_mo)
+      print *,'DEBUG: --> allocate mo%mo_coeff'
+      NULLIFY (mo%mo_coeff)
+      ALLOCATE (mo%mo_coeff)
+      CPASSERT(ASSOCIATED(mo%mo_coeff))
+      print *,'DEBUG: --> call cp_fm_create'
       CALL cp_fm_create(matrix=mo%mo_coeff, matrix_struct=fm_s, name='BLOCK STATES')
 
       ! Transform MO coefficients to original non-orthogonal basis set
+      print *,'DEBUG: --> call pod_mo_set_coeffs'
       CALL pod_mo_set_coeffs(qs_env, ec, id, mo, mat_u, n_ao, n_mo)
 
       ! Occupancies
       NULLIFY (mo%occupation_numbers)
+      print *,'DEBUG: --> allocate mo%occupation_numbers'
       ALLOCATE (mo%occupation_numbers(n_mo))
       CPASSERT(ASSOCIATED(mo%occupation_numbers))
       mo%occupation_numbers = 0.0_dp
 
       IF (n_el > 0) THEN
+         print *,'DEBUG: --> call get_qs_env'
          CALL get_qs_env(qs_env, scf_control=scf_cntrl)
+         print *,'DEBUG: --> call set_mo_occupation'
          CALL set_mo_occupation(mo_set=mo, smear=scf_cntrl%smear)
       END IF
 
       ! Clean memory
+      print *,'DEBUG: --> call cp_fm_struct_release'
       CALL cp_fm_struct_release(fmstruct=fm_s)
 
       ! Running time
+      print *,'DEBUG: --> call timestop'
       CALL timestop(handle)
 
    END SUBROUTINE pod_mo_set

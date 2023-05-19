@@ -17,7 +17,6 @@ MODULE et_coupling_pod_read
                                               cp_fm_struct_type
    USE cp_fm_types,                     ONLY: cp_fm_create,&
                                               cp_fm_read_unformatted,&
-                                              cp_fm_p_type,&
                                               cp_fm_type
    USE et_coupling_pod_core,            ONLY: pod_block_diag,&
                                               pod_block_hamiltonian
@@ -326,7 +325,7 @@ CONTAINS
       TYPE(et_pod), POINTER                              :: ec
       INTEGER                                            :: n_spins
       TYPE(cp_fm_struct_type), POINTER                   :: fm_s
-      TYPE(cp_fm_type), POINTER                          :: mat_w
+      TYPE(cp_fm_type)                                   :: mat_w
       INTEGER                                            :: n_ao
       CHARACTER(LEN=default_path_length)                 :: file_tmf, file_tmr, file_hab, file_wfn
       LOGICAL                                            :: blocks
@@ -337,10 +336,7 @@ CONTAINS
 
       ! Local variables
       INTEGER                                            :: handle
-      TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: mat_h
-
-      ! Pointer initialization
-      NULLIFY (mat_h)
+      TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:)        :: mat_h
 
       ! Time mark
       CALL timeset(routineN, handle)
