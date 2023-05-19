@@ -14,6 +14,7 @@ MODULE et_coupling_pod_print
                                               cp_fm_type
    USE cp_log_handling,                 ONLY: cp_logger_type
    USE cp_output_handling,              ONLY: cp_p_file,&
+                                              cp_print_key_finished_output,&
                                               cp_print_key_should_output,&
                                               cp_print_key_unit_nr
    USE et_coupling_pod_mo,              ONLY: pod_mo_sum_c2
@@ -293,58 +294,152 @@ CONTAINS
 
       ! Local variables
       CHARACTER(LEN=default_path_length)                 :: filename, my_pos, title
-      INTEGER                                            :: i, j, k, l, nspins, unit_nr, handle
+      INTEGER                                            :: i, j, k, l, id, handle, n_spins, unit_nr
       INTEGER                                            :: n_states(2)
-#if defined(__SCALAPACK)
-      INTEGER                                            :: nr, nc
-      REAL(KIND=dp), DIMENSION(:, :), POINTER            :: w1, w2
-#endif
-      LOGICAL                                            :: append
       TYPE(section_vals_type), POINTER                   :: print_key
+#if defined(__SCALAPACK)
+      INTEGER                                            :: n, info, tg1, tg2
+      INTEGER                                            :: ib, ix, ic, ir, ir_loc, ic_loc
+      INTEGER                                            :: n_b_row, n_b_col
+      INTEGER                                            :: n_p_row, n_p_col
+      INTEGER                                            :: n_t_row, n_t_col
+      INTEGER                                            :: p_row_i, p_col_i
+      INTEGER                                            :: p_row_0, p_col_0
+      INTEGER, DIMENSION(9)                              :: desc
+      REAL(KIND=dp), DIMENSION(:), POINTER               :: v1, v2
+      REAL(KIND=dp), DIMENSION(:, :), POINTER             :: d1, d2
+      TYPE(cp_fm_type), POINTER                          :: m1, m2
+
+      INTEGER, EXTERNAL                                  :: numroc
+#endif
 
       ! Time mark
       CALL timeset(routineN, handle)
+
+#if defined(__SCALAPACK)
+      NULLIFY (m1)
+      NULLIFY (m2)
+      NULLIFY (d1)
+      NULLIFY (d2)
+      NULLIFY (v1)
+      NULLIFY (v2)
+
+      tg1 = 0
+      tg2 = 0
+#endif
 
       n_states = 0
       DO i = 1, SIZE(mo)
          n_states(i) = mo(i)%nmo
       END DO
-      nspins = 1
-      IF (n_states(2) > 0) nspins = 2
+      n_spins = 1
+      IF (n_states(2) > 0) n_spins = 2
 
       print_key => section_vals_get_subs_vals(section_vals=ec_sec, &
-                                              subsection_name="PRINT%COUPLINGS")
+                                              subsection_name="PRINT%COUPLING_ELEMENTS")
 
       IF (BTEST(cp_print_key_should_output(logger%iter_info, print_key), &
                 cp_p_file)) THEN
 
          my_pos = "REWIND"
-         append = section_get_lval(print_key, "APPEND")
-         IF (append) THEN
+         IF (section_get_lval(print_key, "APPEND")) &
             my_pos = "APPEND"
-         END IF
 
+         ! Header
          IF (output_unit > 0) &
             WRITE (output_unit, '(/,T3,A/)') 'Printing coupling elements to output files'
 
 #if defined(__SCALAPACK)
 
          DO i = 1, ec%n_blocks
+            id = 1
             DO j = i + 1, ec%n_blocks
 
-               nr = ec%block(i)%hab(1, j)%matrix_struct%nrow_global
-               nc = ec%block(i)%hab(1, j)%matrix_struct%ncol_global
-
-               ALLOCATE (w1(nr, nc))
-               CPASSERT(ASSOCIATED(w1))
-               CALL get_fm_matrix_array(ec%block(i)%hab(1, j), w1)
-               IF (nspins > 1) THEN
-                  ALLOCATE (w2(nr, nc))
-                  CPASSERT(ASSOCIATED(w2))
-                  CALL get_fm_matrix_array(ec%block(i)%hab(2, j), w2)
+               ! Matrix pointers
+               m1 => ec%block(i)%hab(1, id)
+               IF (SIZE(ec%block(i)%hab, 1) > 1) &
+                  m2 => ec%block(i)%hab(2, id)
+               ! Total number of rows/columns
+               n_t_row = m1%matrix_struct%nrow_global
+               n_t_col = m1%matrix_struct%ncol_global
+               ! Number of rows/columns in Scalapack blocks
+               n_b_row = m1%matrix_struct%nrow_block
+               n_b_col = m1%matrix_struct%ncol_block
+   
+               ! Context and descriptor
+               CALL m1%matrix_struct%context%gridinit('R', 1, m1%matrix_struct%para_env%num_pe)
+               CALL descinit(desc, n_t_row, n_t_col, n_b_row, n_t_col, 0, 0, &
+                             m1%matrix_struct%context%get_handle(), n_t_row, info)
+               CPASSERT(info == 0)
+               CALL m2%matrix_struct%context%gridinit('R', 1, m2%matrix_struct%para_env%num_pe)
+               CALL descinit(desc, n_t_row, n_t_col, n_b_row, n_t_col, 0, 0, &
+                             m2%matrix_struct%context%get_handle(), n_t_row, info)
+               CPASSERT(info == 0)
+   
+               ! Number of rows on the actual processor
+               n = numroc(n_t_row, n_b_row, p_row_i, 0, n_p_row)
+   
+               ! Local data arrays
+               ALLOCATE (d1(MAX(1, n), n_t_col))
+               ALLOCATE (v1(n_b_row*n_t_col))
+               v1 = HUGE(1.0_dp)
+               IF (SIZE(ec%block(i)%hab, 1) > 1) THEN
+                  ALLOCATE (d2(MAX(1, n), n_t_col))
+                  ALLOCATE (v2(n_b_row*n_t_col))
+                  v2 = HUGE(1.0_dp)
                END IF
-
-               IF (output_unit > 0) THEN
+   
+               ! Get the matrix elements
+               CALL pdgemr2d(n_t_row, n_t_col, m1%local_data(1, 1), 1, 1, &
+                             m1%matrix_struct%descriptor, d1(1, 1), 1, 1, desc, &
+                             m1%matrix_struct%context%get_handle())
+                             
+               IF (SIZE(ec%block(i)%hab, 1) > 1) THEN
+                  CALL pdgemr2d(n_t_row, n_t_col, m2%local_data(1, 1), 1, 1, &
+                                m2%matrix_struct%descriptor, d2(1, 1), 1, 1, desc, &
+                                m2%matrix_struct%context%get_handle())
+                                
+               END IF
+   
+               ! Row / column index
+               k = 1
+               l = 1
+   
+               ! Loop over blocks of rows
+               DO ir = 1, n_t_row, MAX(n_b_row, 1)
+   
+                  ! Number of rows in the block
+                  ib = MIN(n_b_row, n_t_row - ir + 1)
+   
+                  ! Local element position
+                  CALL infog2l(ir, 1, desc, n_p_row, n_p_col, p_row_i, p_col_i, &
+                               ir_loc, ic_loc, p_row_0, p_col_0)
+   
+                  ! Save block-row columns
+                  IF (p_row_0 == p_row_i) THEN
+                     DO ix = 1, ib
+                        v1((ix - 1)*n_t_col + 1:n_t_col*ix) = d1(ir_loc + ix - 1, :)
+                        IF (SIZE(ec%block(i)%hab, 1) > 1) &
+                           v2((ix - 1)*n_t_col + 1:n_t_col*ix) = d2(ir_loc + ix - 1, :)
+                     END DO
+                  END IF
+   
+                  ! Transfer data
+                  IF (p_row_0 /= 0) THEN
+                     IF (p_row_0 == p_row_i) THEN
+                        CALL mp_send(v1(:), 0, tg1, m1%matrix_struct%para_env%group)
+                        IF (SIZE(ec%block(i)%hab, 1) > 1) &
+                           CALL mp_send(v2(:), 0, tg2, m2%matrix_struct%para_env%group)
+                     END IF
+                     IF (p_row_i == 0) THEN
+                        CALL mp_recv(v1(:), p_row_0, tg1, m1%matrix_struct%para_env%group)
+                        IF (SIZE(ec%block(i)%hab, 1) > 1) &
+                           CALL mp_recv(v2(:), p_row_0, tg2, m2%matrix_struct%para_env%group)
+                     END IF
+                  END IF
+   
+                  ! Output
+                  IF (output_unit > 0) THEN
 
                   WRITE (filename, '(a5,I1.1,a1,I1.1)') "ET_BL_", i, "-", j
                   unit_nr = cp_print_key_unit_nr(logger, ec_sec, "PRINT%COUPLINGS", &
@@ -354,44 +449,63 @@ CONTAINS
                   WRITE (title, *) 'Coupling elements [meV] between blocks:', i, j
 
                   WRITE (unit_nr, *) TRIM(title)
-                  IF (nspins > 1) THEN
+                  IF (n_spins > 1) THEN
                      WRITE (unit_nr, '(T3,A8,T13,A8,T28,A,A)') 'State A', 'State B', &
                            'Coupling spin 1', '  Coupling spin 2'
                   ELSE
                      WRITE (unit_nr, '(T3,A8,T13,A8,T28,A)') 'State A', 'State B', 'Coupling'
                   END IF
 
-                  DO k = 1, MIN(ec%block(i)%n_ao, n_states(1))
-                     DO l = 1, MIN(ec%block(j)%n_ao, n_states(1))
-
-                        IF (nspins > 1) THEN
-
-                           WRITE (unit_nr, '(T3,I5,T13,I5,T22,E20.6)', ADVANCE='no') &
-                              k, l, w1(k, l)*evolt*1000.0_dp
-                           IF ((k <= n_states(2)) .AND. (l <= n_states(2))) THEN
-                              WRITE (unit_nr, '(E20.6)') &
-                                 w2(k, l)*evolt*1000.0_dp
-                           ELSE
+                     DO ix = 1, ib
+                        DO ic = (ix - 1)*n_t_col + 1, n_t_col*ix
+   
+                           IF (k <= MIN(ec%block(i)%n_ao, n_states) .AND. &
+                               l <= MIN(ec%block(j)%n_ao, n_states)) THEN
+   
+                              WRITE (unit_nr, '(T3,I5,T13,I5,T22,E20.6)', ADVANCE='no') &
+                                 k, l, v1(ic)*evolt*1000.0_dp
+   
+                              ! Second spin component
+                              IF (n_spins > 1 .AND. k <= n_beta_states .AND. l <= n_beta_states) THEN
+                                  
+                                 WRITE (unit_nr, '(E20.6)', ADVANCE='no') &
+                                    v2(ic)*evolt*1000.0_dp
+                              END IF
+   
                               WRITE (unit_nr, *)
+   
                            END IF
-
-                        ELSE
-
-                           WRITE (unit_nr, '(T3,I5,T13,I5,T22,E20.6)') &
-                              k, l, w1(k, l)*evolt*1000.0_dp
-                        END IF
-
+   
+                           ! Row / column IDs
+                           l = l + 1
+                           IF (l > n_t_col) THEN
+                              l = 1
+                              k = k + 1
+                           END IF
+   
+                        END DO
                      END DO
-                     WRITE (unit_nr, *)
-                  END DO
-                  CALL cp_print_key_finished_output(unit_nr, logger, ec_sec, "PRINT%COUPLINGS")
 
+                  CALL cp_print_key_finished_output(unit_nr, logger, ec_sec, "PRINT%COUPLINGS")
+                  END IF
+   
+               END DO
+   
+               ! clean memory
+               CALL cp_blacs_gridexit(cntxt_loc)
+   
+               IF (ASSOCIATED(d1)) &
+                  DEALLOCATE (d1)
+               IF (ASSOCIATED(v1)) &
+                  DEALLOCATE (v1)
+               IF (SIZE(ec%block(i)%hab, 1) > 1) THEN
+                  IF (ASSOCIATED(d2)) &
+                     DEALLOCATE (d2)
+                  IF (ASSOCIATED(v2)) &
+                     DEALLOCATE (v2)
                END IF
 
-               IF (ASSOCIATED(w1)) &
-                  DEALLOCATE (w1)
-               IF (ASSOCIATED(w2)) &
-                  DEALLOCATE (w2)
+               id = id + 1
 
             END DO
          END DO
@@ -401,27 +515,26 @@ CONTAINS
          IF (output_unit > 0) THEN
 
             DO i = 1, ec%n_blocks
+               id = 1
                DO j = i + 1, ec%n_blocks
 
-                  WRITE (filename, '(a5,I1.1,a1,I1.1)') "ET_BL_", i, "-", j
+                  WRITE (filename, '(A5,I1.1,A1,I1.1)') "ET_BL_", i, "-", j
                   unit_nr = cp_print_key_unit_nr(logger, ec_sec, "PRINT%COUPLINGS", extension=".elcoup", &
-                                                 middle_name=TRIM(filename), file_position=my_pos, &
-                                                 log_filename=.FALSE.)
-
+                                        middle_name=TRIM(filename), file_position=my_pos, &
+                                        log_filename=.FALSE.)
                   WRITE (title, *) 'Coupling elements [meV] between blocks:', i, j
-
                   WRITE (unit_nr, *) TRIM(title)
-                  IF (nspins > 1) THEN
-                     WRITE (unit_nr, '(T3,A8,T13,A8,T28,A,A)') 'State A', 'State B', 
+                  IF (n_spins > 1) THEN
+                     WRITE (unit_nr, '(T3,A8,T13,A8,T28,A,A)') 'State A', 'State B', &
                             'Coupling spin 1', '  Coupling spin 2'
                   ELSE
                      WRITE (unit_nr, '(T3,A8,T13,A8,T28,A)') 'State A', 'State B', 'Coupling'
                   END IF
 
                   DO k = 1, MIN(ec%block(i)%n_ao, n_states(1))
-                     DO l = 1, MIN(ec%block(j)%n_ao, n_states(1))
-
-                        IF (nspins > 1) THEN
+                     DO l = 1, MIN(ec%block(j)%n_ao, n_states(2))
+   
+                        IF (n_spins > 1) THEN
 
                            WRITE (unit_nr, '(T3,I5,T13,I5,T22,E20.6)', ADVANCE='no') &
                               k, l, &
@@ -432,20 +545,22 @@ CONTAINS
                            ELSE
                               WRITE (unit_nr, *)
                            END IF
-
+   
                         ELSE
-
+   
                            WRITE (unit_nr, '(T3,I5,T13,I5,T22,E20.6)') &
                               k, l, &
                               ec%block(i)%hab(1, j)%local_data(k, l)*evolt*1000.0_dp
-
+   
                         END IF
-
+   
                      END DO
-                     WRITE (unit_nr, *)
                   END DO
 
                   CALL cp_print_key_finished_output(unit_nr, logger, ec_sec, "PRINT%COUPLINGS")
+
+                  id = id + 1
+
                END DO
             END DO
 

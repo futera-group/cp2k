@@ -10,6 +10,7 @@
 MODULE et_coupling_pod_utils
 
    USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm
+   USE cp_fm_diag,                      ONLY: cp_fm_power
    USE cp_fm_types,                     ONLY: cp_fm_type
    USE cp_log_handling,                 ONLY: cp_logger_type
    USE cp_output_handling,              ONLY: cp_print_key_generate_filename
