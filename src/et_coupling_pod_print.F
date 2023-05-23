@@ -9,7 +9,9 @@
 ! **************************************************************************************************
 MODULE et_coupling_pod_print
 
+   USE cp_blacs_types,                  ONLY: cp_blacs_type
    USE cp_fm_types,                     ONLY: cp_fm_create,&
+                                              cp_fm_get_info,&
                                               cp_fm_release,&
                                               cp_fm_type
    USE cp_log_handling,                 ONLY: cp_logger_type
@@ -25,6 +27,7 @@ MODULE et_coupling_pod_print
                                               section_vals_val_get
    USE kinds,                           ONLY: default_path_length,&
                                               dp
+   USE message_passing,                 ONLY: mp_para_env_type
    USE parallel_gemm_api,               ONLY: parallel_gemm
    USE physcon,                         ONLY: evolt
    USE qs_environment_types,            ONLY: get_qs_env,&
@@ -298,17 +301,20 @@ CONTAINS
       INTEGER                                            :: n_states(2)
       TYPE(section_vals_type), POINTER                   :: print_key
 #if defined(__SCALAPACK)
-      INTEGER                                            :: n, info, tg1, tg2
-      INTEGER                                            :: ib, ix, ic, ir, ir_loc, ic_loc
-      INTEGER                                            :: n_b_row, n_b_col
-      INTEGER                                            :: n_p_row, n_p_col
-      INTEGER                                            :: n_t_row, n_t_col
-      INTEGER                                            :: p_row_i, p_col_i
-      INTEGER                                            :: p_row_0, p_col_0
-      INTEGER, DIMENSION(9)                              :: desc
+     
+      LOGICAL                                            :: blank_line
+      INTEGER                                            :: tag_m1, tag_m2
+      INTEGER                                            :: n, ib, ic, ir, ix, info
+      INTEGER                                            :: ir_l_m1, ic_l_m1, ir_l_m2, ic_l_m2
+      INTEGER                                            :: pr_m1, pc_m1, pr_m2, pc_m2
+      INTEGER                                            :: nr_m1, nr_m2, nc_m1, nc_m2
+      INTEGER                                            :: nr_b_m1, nr_b_m2
+      INTEGER, DIMENSION(9)                              :: desc_m1, desc_m2
       REAL(KIND=dp), DIMENSION(:), POINTER               :: v1, v2
-      REAL(KIND=dp), DIMENSION(:, :), POINTER             :: d1, d2
+      REAL(KIND=dp), DIMENSION(:, :), POINTER            :: d1, d2
       TYPE(cp_fm_type), POINTER                          :: m1, m2
+      TYPE(cp_blacs_type)                                :: cntxt_m1, cntxt_m2
+      TYPE(mp_para_env_type), POINTER                    :: para_m1, para_m2
 
       INTEGER, EXTERNAL                                  :: numroc
 #endif
@@ -319,17 +325,15 @@ CONTAINS
       print *,'DEBUG: --> call timeset'
       CALL timeset(routineN, handle)
 
-!#if defined(__SCALAPACK)
-!      NULLIFY (m1)
-!      NULLIFY (m2)
-!      NULLIFY (d1)
-!      NULLIFY (d2)
-!      NULLIFY (v1)
-!      NULLIFY (v2)
-!
-!      tg1 = 0
-!      tg2 = 0
-!#endif
+#if defined(__SCALAPACK)
+      NULLIFY (d1)
+      NULLIFY (d2)
+      NULLIFY (v1)
+      NULLIFY (v2)
+
+      tag_m1 = 0
+      tag_m2 = 0
+#endif
 
       n_states = 0
       DO i = 1, SIZE(mo)
@@ -356,169 +360,200 @@ CONTAINS
          IF (output_unit > 0) &
             WRITE (output_unit, '(/,T3,A/)') 'Printing coupling elements to output files'
 
-!#if defined(__SCALAPACK)
-!
-!         DO i = 1, ec%n_blocks
-!            id = 1
-!            DO j = i + 1, ec%n_blocks
-!
-!               ! Matrix pointers
-!               m1 => ec%block(i)%hab(1, id)
-!               IF (SIZE(ec%block(i)%hab, 1) > 1) &
-!                  m2 => ec%block(i)%hab(2, id)
-!               ! Total number of rows/columns
-!               n_t_row = m1%matrix_struct%nrow_global
-!               n_t_col = m1%matrix_struct%ncol_global
-!               ! Number of rows/columns in Scalapack blocks
-!               n_b_row = m1%matrix_struct%nrow_block
-!               n_b_col = m1%matrix_struct%ncol_block
-!   
-!               ! Context and descriptor
-!               CALL m1%matrix_struct%context%gridinit('R', 1, m1%matrix_struct%para_env%num_pe)
-!               CALL descinit(desc, n_t_row, n_t_col, n_b_row, n_t_col, 0, 0, &
-!                             m1%matrix_struct%context%get_handle(), n_t_row, info)
-!               CPASSERT(info == 0)
-!               CALL m2%matrix_struct%context%gridinit('R', 1, m2%matrix_struct%para_env%num_pe)
-!               CALL descinit(desc, n_t_row, n_t_col, n_b_row, n_t_col, 0, 0, &
-!                             m2%matrix_struct%context%get_handle(), n_t_row, info)
-!               CPASSERT(info == 0)
-!   
-!               ! Number of rows on the actual processor
-!               n = numroc(n_t_row, n_b_row, p_row_i, 0, n_p_row)
-!   
-!               ! Local data arrays
-!               ALLOCATE (d1(MAX(1, n), n_t_col))
-!               ALLOCATE (v1(n_b_row*n_t_col))
-!               v1 = HUGE(1.0_dp)
-!               IF (SIZE(ec%block(i)%hab, 1) > 1) THEN
-!                  ALLOCATE (d2(MAX(1, n), n_t_col))
-!                  ALLOCATE (v2(n_b_row*n_t_col))
-!                  v2 = HUGE(1.0_dp)
-!               END IF
-!   
-!               ! Get the matrix elements
-!               CALL pdgemr2d(n_t_row, n_t_col, m1%local_data(1, 1), 1, 1, &
-!                             m1%matrix_struct%descriptor, d1(1, 1), 1, 1, desc, &
-!                             m1%matrix_struct%context%get_handle())
-!                             
-!               IF (SIZE(ec%block(i)%hab, 1) > 1) THEN
-!                  CALL pdgemr2d(n_t_row, n_t_col, m2%local_data(1, 1), 1, 1, &
-!                                m2%matrix_struct%descriptor, d2(1, 1), 1, 1, desc, &
-!                                m2%matrix_struct%context%get_handle())
-!                                
-!               END IF
-!   
-!               ! Row / column index
-!               k = 1
-!               l = 1
-!   
-!               ! Loop over blocks of rows
-!               DO ir = 1, n_t_row, MAX(n_b_row, 1)
-!   
-!                  ! Number of rows in the block
-!                  ib = MIN(n_b_row, n_t_row - ir + 1)
-!   
-!                  ! Local element position
-!                  CALL infog2l(ir, 1, desc, n_p_row, n_p_col, p_row_i, p_col_i, &
-!                               ir_loc, ic_loc, p_row_0, p_col_0)
-!   
-!                  ! Save block-row columns
-!                  IF (p_row_0 == p_row_i) THEN
-!                     DO ix = 1, ib
-!                        v1((ix - 1)*n_t_col + 1:n_t_col*ix) = d1(ir_loc + ix - 1, :)
-!                        IF (SIZE(ec%block(i)%hab, 1) > 1) &
-!                           v2((ix - 1)*n_t_col + 1:n_t_col*ix) = d2(ir_loc + ix - 1, :)
-!                     END DO
-!                  END IF
-!   
-!                  ! Transfer data
-!                  IF (p_row_0 /= 0) THEN
-!                     IF (p_row_0 == p_row_i) THEN
-!                        CALL mp_send(v1(:), 0, tg1, m1%matrix_struct%para_env%group)
-!                        IF (SIZE(ec%block(i)%hab, 1) > 1) &
-!                           CALL mp_send(v2(:), 0, tg2, m2%matrix_struct%para_env%group)
-!                     END IF
-!                     IF (p_row_i == 0) THEN
-!                        CALL mp_recv(v1(:), p_row_0, tg1, m1%matrix_struct%para_env%group)
-!                        IF (SIZE(ec%block(i)%hab, 1) > 1) &
-!                           CALL mp_recv(v2(:), p_row_0, tg2, m2%matrix_struct%para_env%group)
-!                     END IF
-!                  END IF
-!   
-!                  ! Output
-!                  IF (output_unit > 0) THEN
-!
-!                  WRITE (filename, '(a5,I1.1,a1,I1.1)') "ET_BL_", i, "-", j
-!                  unit_nr = cp_print_key_unit_nr(logger, ec_sec, "PRINT%COUPLING_ELEMENTS", &
-!                                                 extension=".elcoup", middle_name=TRIM(filename), &
-!                                                 file_position=my_pos, log_filename=.FALSE.)
-!
-!                  WRITE (title, *) 'Coupling elements [meV] between blocks:', i, j
-!
-!                  WRITE (unit_nr, *) TRIM(title)
-!                  IF (n_spins > 1) THEN
-!                     WRITE (unit_nr, '(T3,A8,T13,A8,T28,A,A)') 'State A', 'State B', &
-!                           'Coupling spin 1', '  Coupling spin 2'
-!                  ELSE
-!                     WRITE (unit_nr, '(T3,A8,T13,A8,T28,A)') 'State A', 'State B', 'Coupling'
-!                  END IF
-!
-!                     DO ix = 1, ib
-!                        DO ic = (ix - 1)*n_t_col + 1, n_t_col*ix
-!   
-!                           IF (k <= MIN(ec%block(i)%n_ao, n_states) .AND. &
-!                               l <= MIN(ec%block(j)%n_ao, n_states)) THEN
-!   
-!                              WRITE (unit_nr, '(T3,I5,T13,I5,T22,E20.6)', ADVANCE='no') &
-!                                 k, l, v1(ic)*evolt*1000.0_dp
-!   
-!                              ! Second spin component
-!                              IF (n_spins > 1 .AND. k <= n_beta_states .AND. l <= n_beta_states) THEN
-!                                  
-!                                 WRITE (unit_nr, '(E20.6)', ADVANCE='no') &
-!                                    v2(ic)*evolt*1000.0_dp
-!                              END IF
-!   
-!                              WRITE (unit_nr, *)
-!   
-!                           END IF
-!   
-!                           ! Row / column IDs
-!                           l = l + 1
-!                           IF (l > n_t_col) THEN
-!                              l = 1
-!                              k = k + 1
-!                           END IF
-!   
-!                        END DO
-!                     END DO
-!
-!                  CALL cp_print_key_finished_output(unit_nr, logger, &
-!                         ec_sec, "PRINT%COUPLING_ELEMENTS")
-!                  END IF
-!   
-!               END DO
-!   
-!               ! clean memory
-!               CALL cp_blacs_gridexit(cntxt_loc)
-!   
-!               IF (ASSOCIATED(d1)) &
-!                  DEALLOCATE (d1)
-!               IF (ASSOCIATED(v1)) &
-!                  DEALLOCATE (v1)
-!               IF (SIZE(ec%block(i)%hab, 1) > 1) THEN
-!                  IF (ASSOCIATED(d2)) &
-!                     DEALLOCATE (d2)
-!                  IF (ASSOCIATED(v2)) &
-!                     DEALLOCATE (v2)
-!               END IF
-!
-!               id = id + 1
-!
-!            END DO
-!         END DO
-!
-!#else
+#if defined(__SCALAPACK)
+
+         DO i = 1, ec%n_blocks
+            id = 1
+            DO j = i + 1, ec%n_blocks
+
+               ! Alpha states
+               m1 => ec%block(i)%hab(1, id)
+               CALL cp_fm_get_info(m1, nrow_global=nr_m1, ncol_global=nc_m1, &
+                                   nrow_block=nr_b_m1, para_env=para_m1)
+               CALL cntxt_m1%gridinit(para_m1,'R',1, para_m1%num_pe)
+               CALL descinit(desc_m1, nr_m1, nc_m1, nr_b_m1, nc_m1, 0, 0, &
+                             cntxt_m1%get_handle(), nr_m1, info)
+               CPASSERT(info == 0)
+               n = numroc(nr_m1, nr_b_m1, cntxt_m1%mepos(1), 0, cntxt_m1%num_pe(1))
+               ALLOCATE (d1(MAX(1, n), nc_m1))
+               CALL pdgemr2d(nr_m1, nc_m1, m1%local_data(1, 1), 1, 1, &
+                             m1%matrix_struct%descriptor, d1, 1, 1, desc_m1, cntxt_m1%get_handle())
+               ALLOCATE (v1(nr_b_m1*nc_m1))
+               v1 = HUGE(1.0_dp)
+
+               ! Beta statse
+               IF (SIZE(ec%block(i)%hab, 1) > 1) THEN
+                  m2 => ec%block(i)%hab(2, id)
+                  CALL cp_fm_get_info(m2, nrow_global=nr_m2, ncol_global=nc_m2, &
+                                      nrow_block=nr_b_m2, para_env=para_m2)
+                  CALL cntxt_m2%gridinit(para_m2,'R',1, para_m2%num_pe)
+                  CALL descinit(desc_m2, nr_m2, nc_m2, nr_b_m2, nc_m2, 0, 0, &
+                                cntxt_m2%get_handle(), nr_m2, info)
+                  CPASSERT(info == 0)
+                  n = numroc(nr_m2, nr_b_m2, cntxt_m2%mepos(1), 0, cntxt_m2%num_pe(1))
+                  ALLOCATE (d2(MAX(1, n), nc_m2))
+                  CALL pdgemr2d(nr_m2, nc_m2, m2%local_data(1, 1), 1, 1, &
+                                m2%matrix_struct%descriptor, d2, 1, 1, desc_m2, cntxt_m2%get_handle())
+                  ALLOCATE (v2(nr_b_m2*nc_m2))
+                  v2 = HUGE(1.0_dp)
+               END IF
+
+               ! Open the output file
+               IF (output_unit > 0) THEN
+
+                  WRITE (filename, '(a5,I1.1,a1,I1.1)') "ET_BL_", i, "-", j
+                  unit_nr = cp_print_key_unit_nr(logger, ec_sec, "PRINT%COUPLING_ELEMENTS", &
+                                                 extension=".elcoup", middle_name=TRIM(filename), &
+                                                 file_position=my_pos, log_filename=.FALSE.)
+   
+                  WRITE (title, *) 'Coupling elements [meV] between blocks:', i, j
+   
+                  WRITE (unit_nr, *) TRIM(title)
+                  IF (n_spins > 1) THEN
+                     WRITE (unit_nr, '(T3,A8,T13,A8,T28,A,A)') 'State A', 'State B', &
+                           'Coupling spin 1', '  Coupling spin 2'
+                  ELSE
+                     WRITE (unit_nr, '(T3,A8,T13,A8,T28,A)') 'State A', 'State B', 'Coupling'
+                  END IF
+
+               END IF
+
+               ! Row / column index
+               k = 1
+               l = 1
+
+               ! Loop over blocks of rows
+               CPASSERT(nr_m1 == nr_m2)
+               CPASSERT(nc_m1 == nc_m2)
+               CPASSERT(nr_b_m1 == nr_b_m2)
+               DO ir = 1, nr_m1, MAX(nr_b_m1, 1)
+   
+                  ! Number of rows in the block
+                  ib = MIN(nr_b_m1, nr_m1 - ir + 1)
+                  if (output_unit > 0) print *,'DEBUG: (1) ir, ib = ',ir,ib
+   
+                  ! Transfer alpha-spin data
+                  CALL infog2l(ir, 1, desc_m1, cntxt_m1%num_pe(1), cntxt_m1%num_pe(2), &
+                               cntxt_m1%mepos(1), cntxt_m2%mepos(2), ir_l_m1, ic_l_m1, pr_m1, pc_m1)
+                  IF (pr_m1 == cntxt_m1%mepos(1)) THEN
+                     if (output_unit > 0) print *,'DEBUG: fill the v1 array'
+                     DO ix = 1, ib
+                        v1((ix - 1)*nc_m1 + 1:nc_m1*ix) = d1(ir_l_m1 + ix - 1, :)
+                     END DO
+                  END IF
+                  IF (pr_m1 /= 0) THEN
+                     if (output_unit > 0) print *,'DEBUG: send/receive v1 data'
+                     IF (pr_m1 == cntxt_m1%mepos(1)) &
+                        CALL para_m1%send(v1(:), 0, tag_m1)
+                     IF (cntxt_m1%mepos(1) == 0) &
+                        CALL para_m1%recv(v1(:), pr_m1, tag_m1)
+                  END IF
+ 
+                  ! Transfer beta-spin data
+                  IF (SIZE(ec%block(i)%hab, 1) > 1) THEN
+                     CALL infog2l(ir, 1, desc_m2, cntxt_m2%num_pe(1), cntxt_m2%num_pe(2), &
+                                  cntxt_m2%mepos(1), cntxt_m2%mepos(2), ir_l_m2, ic_l_m2, pr_m2, pc_m2)
+                     IF (pr_m2 == cntxt_m2%mepos(1)) THEN
+                        if (output_unit > 0) print *,'DEBUG: fill the v2 array'
+                        DO ix = 1, ib
+                           v2((ix - 1)*nc_m2 + 1:nc_m2*ix) = d2(ir_l_m2 + ix - 1, :)
+                        END DO
+                     END IF
+                     IF (pr_m2 /= 0) THEN
+                        if (output_unit > 0) print *,'DEBUG: send/receive v2 data'
+                        IF (pr_m2 == cntxt_m2%mepos(1)) &
+                           CALL para_m2%send(v2(:), 0, tag_m2)
+                        IF (cntxt_m2%mepos(1) == 0) &
+                           CALL para_m2%recv(v2(:), pr_m2, tag_m2)
+                     END IF
+                  END IF
+
+                  if (output_unit > 0) print *,'DEBUG: (2) ir, ib = ',ir,ib
+   
+                  ! Output
+                  IF (output_unit > 0) THEN
+
+                     print *,'DEBUG: (3) ir, ib = ',ir,ib
+
+                     print *,'DEBUG: (4) ir, ib = ',ir,ib
+!                     write (unit_nr, *) 'DEBUG: i, j, id = ',i,j,id
+!                     write (unit_nr, *) 'DEBUG: nr_m1, nc_m1 = ',nr_m1,nc_m1
+!                     write (unit_nr, *) 'DEBUG: nr_m2, nc_m2 = ',nr_m2,nc_m2
+!                     write (unit_nr, *) 'DEBUG: nr_b_m1, nr_b_m2 = ',nr_b_m1,nr_b_m2
+!                     write (unit_nr, *) 'DEBUG: size of v1, v2 = ',size(v1),size(v2)
+!                     write (unit_nr, *) 'DEBUG: ir, ib = ',ir,ib
+!                     write (unit_nr, *) 'DEBUG: initial k, l = ',k,l
+!                     write (unit_nr, *) 'DEBUG: max k, l = ',MIN(ec%block(i)%n_ao, n_states(1)),MIN(ec%block(j)%n_ao, n_states(1))
+!                     write (unit_nr, *) 'DEBUG: ib, nc_m1 = ',ib,nc_m1
+
+                     DO ix = 1, ib
+                        blank_line = .FALSE.
+                        DO ic = (ix - 1)*nc_m1 + 1, nc_m1*ix
+!                          write (unit_nr, *) 'DEBUG: initial ix,ic,k, l = ',ix,ic,k,l
+   
+                           IF (k <= MIN(ec%block(i)%n_ao, n_states(1)) .AND. &
+                               l <= MIN(ec%block(j)%n_ao, n_states(1))) THEN
+                              ! alpha spin
+                              WRITE (unit_nr, '(T3,I5,T13,I5,T22,E20.6)', ADVANCE='no') &
+                                 k, l, v1(ic)*evolt*1000.0_dp
+                              ! beta spin
+                              IF (SIZE(ec%block(i)%hab, 1) > 1 .AND. &
+                                  k <= n_states(2) .AND. l <= n_states(2)) &
+                                 WRITE (unit_nr, '(E20.6)', ADVANCE='no') v2(ic)*evolt*1000.0_dp
+   
+                              WRITE (unit_nr, *)
+                              blank_line = .TRUE.
+                           END IF
+   
+                           ! Row / column IDs
+                           l = l + 1
+                           IF (l > nc_m1) THEN
+                              l = 1
+                              k = k + 1
+                           END IF
+   
+                        END DO
+
+                        IF (blank_line) &
+                           WRITE (unit_nr, *)
+                     END DO
+
+                  END IF
+
+               END DO
+
+               ! close the output file
+               IF (output_unit > 0) &
+                 CALL cp_print_key_finished_output(unit_nr, logger, ec_sec, "PRINT%COUPLING_ELEMENTS")
+
+               ! clean memory
+               call cntxt_m1%gridexit()
+               call cntxt_m2%gridexit()
+   
+               IF (ASSOCIATED(d1)) THEN
+                  DEALLOCATE (d1)
+                  NULLIFY (d1)
+               END IF
+               IF (ASSOCIATED(d2)) THEN
+                  DEALLOCATE (d2)
+                  NULLIFY (d2)
+               END IF
+               IF (ASSOCIATED(v1)) THEN
+                  DEALLOCATE (v1)
+                  NULLIFY (v1)
+               END IF
+               IF (ASSOCIATED(v2)) THEN
+                  DEALLOCATE (v2)
+                  NULLIFY (v2)
+               END IF
+
+               ! block index
+               id = id + 1
+
+            END DO
+         END DO
+
+#else
 
          IF (output_unit > 0) THEN
 
@@ -541,7 +576,7 @@ CONTAINS
                   END IF
 
                   DO k = 1, MIN(ec%block(i)%n_ao, n_states(1))
-                     DO l = 1, MIN(ec%block(j)%n_ao, n_states(2))
+                     DO l = 1, MIN(ec%block(j)%n_ao, n_states(1))
    
                         IF (n_spins > 1) THEN
 
@@ -579,7 +614,7 @@ CONTAINS
 
          END IF
 
-!#endif
+#endif
 
       END IF
 
