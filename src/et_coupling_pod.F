@@ -552,70 +552,70 @@ CONTAINS
       ! Spin non-polarized wavefunction
       ELSE
 
-!          IF (master) &
-!             WRITE (output_unit, '(/,T3,A)') 'Spin-restricted calculation'
-!     
-!         !<--- Closed shell / No K-points ---------------------------------------------->!
-!     
-!         ! State eneries of the whole system
-!         print *,'DEBUG: --> call get_qs_env'
-!         CALL get_qs_env(qs_env, mos=mo)
-!         IF (master) THEN
-!            WRITE (output_unit, '(/,T3,A,I10)') &
-!               'Number of AO basis funtions        = ', mo(1)%nao
-!            WRITE (output_unit, '(T3,A,I10)') &
-!               'Number of states                   = ', mo(1)%nmo
-!         END IF
-!         print *,'DEBUG: --> call pod_print_states'
-!         CALL pod_print_states(output_unit, mo, dft_cntrl%nspins, 'the whole system', fermi=.TRUE.)
-!         print *,'DEBUG: --> call pod_set_fermi'
-!         CALL pod_set_fermi(ec, mo(1)%mu)
-!     
-!         ! Read data from files
-!         IF (restart) THEN
-!     
-!            ! Hamiltonian & wavefunction
-!            print *,'DEBUG: --> call pod_read_restart_data'
-!            CALL pod_read_restart_data(output_unit, qs_env, ec, dft_cntrl%nspins, fm_s, &
-!                                       mat_w, n_ao, file_tmf, file_tmr, file_hab, file_wfn, &
-!                                       blocks_only)
-!     
-!         ! New calculation
-!         ELSE
-!     
-!            ! Lowdin transformation matrices
-!            print *,'DEBUG: --> call pod_get_transf_mat'
-!            CALL pod_get_transf_mat(qs_env, ec, mat_w)
-!            ! KS Hamiltonian
-!            print *,'DEBUG: --> call pod_block_hamiltonian'
-!            CALL pod_block_hamiltonian(qs_env, ec, fm_s, mat_h, mat_w, &
-!                                       n_ao, dft_cntrl%nspins)
-!            ! Block diagonization
-!            print *,'DEBUG: --> call pod_block_diag'
-!            CALL pod_block_diag(output_unit, qs_env, ec, mat_h, dft_cntrl%nspins, &
-!                                restart, blocks_only)
-!     
-!         END IF
-!     
-!         ! Print out energies 
-!         DO i = 1, ec%n_blocks
-!            IF (ASSOCIATED(ec%block(i)%mo) .AND. master) THEN
-!               print *,'DEBUG: --> call pod_print_states'
-!               CALL pod_print_states(output_unit, ec%block(i)%mo, dft_cntrl%nspins, &
-!                                     'block '//TRIM(ADJUSTL(cp_to_string(i)))//' states', &
-!                                     mx_mo_a=mo(1)%nmo, fermi=.TRUE.)
-!            END IF
-!            print *,'DEBUG: --> call pod_print_state_fracs'
-!            CALL pod_print_state_fracs(output_unit, qs_env, ec, i, dft_cntrl%nspins)
-!         END DO
-!     
-!         ! Print out coupling elements
-!         print *,'DEBUG: --> call pod_print_couplings'
-!         call pod_print_couplings(output_unit, logger, et_proj_sec, ec, mo)
-!     
-!         ! Save electronic states
-!         print *,'DEBUG: --> call pod_save_state_cube'
-!         CALL pod_save_state_cube(qs_env, ec, dft_cntrl%nspins)
+          IF (master) &
+             WRITE (output_unit, '(/,T3,A)') 'Spin-restricted calculation'
+     
+         !<--- Closed shell / No K-points ---------------------------------------------->!
+     
+         ! State eneries of the whole system
+         print *,'DEBUG: --> call get_qs_env'
+         CALL get_qs_env(qs_env, mos=mo)
+         IF (master) THEN
+            WRITE (output_unit, '(/,T3,A,I10)') &
+               'Number of AO basis funtions        = ', mo(1)%nao
+            WRITE (output_unit, '(T3,A,I10)') &
+               'Number of states                   = ', mo(1)%nmo
+         END IF
+         print *,'DEBUG: --> call pod_print_states'
+         CALL pod_print_states(output_unit, mo, dft_cntrl%nspins, 'the whole system', fermi=.TRUE.)
+         print *,'DEBUG: --> call pod_set_fermi'
+         CALL pod_set_fermi(ec, mo(1)%mu)
+     
+         ! Read data from files
+         IF (restart) THEN
+     
+            ! Hamiltonian & wavefunction
+            print *,'DEBUG: --> call pod_read_restart_data'
+            CALL pod_read_restart_data(output_unit, qs_env, ec, dft_cntrl%nspins, fm_s, &
+                                       mat_w, n_ao, file_tmf, file_tmr, file_hab, file_wfn, &
+                                       blocks_only)
+     
+         ! New calculation
+         ELSE
+     
+            ! Lowdin transformation matrices
+            print *,'DEBUG: --> call pod_get_transf_mat'
+            CALL pod_get_transf_mat(qs_env, ec, mat_w)
+            ! KS Hamiltonian
+            print *,'DEBUG: --> call pod_block_hamiltonian'
+            CALL pod_block_hamiltonian(qs_env, ec, fm_s, mat_h, mat_w, &
+                                       n_ao, dft_cntrl%nspins)
+            ! Block diagonization
+            print *,'DEBUG: --> call pod_block_diag'
+            CALL pod_block_diag(output_unit, qs_env, ec, mat_h, dft_cntrl%nspins, &
+                                restart, blocks_only)
+     
+         END IF
+     
+         ! Print out energies 
+         DO i = 1, ec%n_blocks
+            IF (ASSOCIATED(ec%block(i)%mo) .AND. master) THEN
+               print *,'DEBUG: --> call pod_print_states'
+               CALL pod_print_states(output_unit, ec%block(i)%mo, dft_cntrl%nspins, &
+                                     'block '//TRIM(ADJUSTL(cp_to_string(i)))//' states', &
+                                     mx_mo_a=mo(1)%nmo, fermi=.TRUE.)
+            END IF
+            print *,'DEBUG: --> call pod_print_state_fracs'
+            CALL pod_print_state_fracs(output_unit, qs_env, ec, i, dft_cntrl%nspins)
+         END DO
+     
+         ! Print out coupling elements
+         print *,'DEBUG: --> call pod_print_couplings'
+         call pod_print_couplings(output_unit, logger, et_proj_sec, ec, mo)
+     
+         ! Save electronic states
+         print *,'DEBUG: --> call pod_save_state_cube'
+         CALL pod_save_state_cube(qs_env, ec, dft_cntrl%nspins)
      
       END IF
 

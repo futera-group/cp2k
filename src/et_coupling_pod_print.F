@@ -381,8 +381,8 @@ CONTAINS
                ALLOCATE (v1(nr_b_m1*nc_m1))
                v1 = HUGE(1.0_dp)
 
-               ! Beta statse
-               IF (SIZE(ec%block(i)%hab, 1) > 1) THEN
+               ! Beta states
+               IF (n_spins > 1) THEN
                   m2 => ec%block(i)%hab(2, id)
                   CALL cp_fm_get_info(m2, nrow_global=nr_m2, ncol_global=nc_m2, &
                                       nrow_block=nr_b_m2, para_env=para_m2)
@@ -423,9 +423,12 @@ CONTAINS
                l = 1
 
                ! Loop over blocks of rows
-               CPASSERT(nr_m1 == nr_m2)
-               CPASSERT(nc_m1 == nc_m2)
-               CPASSERT(nr_b_m1 == nr_b_m2)
+               IF (n_spins > 1) THEN
+                  CPASSERT(nr_m1 == nr_m2)
+                  CPASSERT(nc_m1 == nc_m2)
+                  CPASSERT(nr_b_m1 == nr_b_m2)
+               END IF
+
                DO ir = 1, nr_m1, MAX(nr_b_m1, 1)
    
                   ! Number of rows in the block
@@ -434,7 +437,7 @@ CONTAINS
    
                   ! Transfer alpha-spin data
                   CALL infog2l(ir, 1, desc_m1, cntxt_m1%num_pe(1), cntxt_m1%num_pe(2), &
-                               cntxt_m1%mepos(1), cntxt_m2%mepos(2), ir_l_m1, ic_l_m1, pr_m1, pc_m1)
+                               cntxt_m1%mepos(1), cntxt_m1%mepos(2), ir_l_m1, ic_l_m1, pr_m1, pc_m1)
                   IF (pr_m1 == cntxt_m1%mepos(1)) THEN
                      if (output_unit > 0) print *,'DEBUG: fill the v1 array'
                      DO ix = 1, ib
@@ -450,7 +453,7 @@ CONTAINS
                   END IF
  
                   ! Transfer beta-spin data
-                  IF (SIZE(ec%block(i)%hab, 1) > 1) THEN
+                  IF (n_spins > 1) THEN
                      CALL infog2l(ir, 1, desc_m2, cntxt_m2%num_pe(1), cntxt_m2%num_pe(2), &
                                   cntxt_m2%mepos(1), cntxt_m2%mepos(2), ir_l_m2, ic_l_m2, pr_m2, pc_m2)
                      IF (pr_m2 == cntxt_m2%mepos(1)) THEN
@@ -476,20 +479,10 @@ CONTAINS
                      print *,'DEBUG: (3) ir, ib = ',ir,ib
 
                      print *,'DEBUG: (4) ir, ib = ',ir,ib
-!                     write (unit_nr, *) 'DEBUG: i, j, id = ',i,j,id
-!                     write (unit_nr, *) 'DEBUG: nr_m1, nc_m1 = ',nr_m1,nc_m1
-!                     write (unit_nr, *) 'DEBUG: nr_m2, nc_m2 = ',nr_m2,nc_m2
-!                     write (unit_nr, *) 'DEBUG: nr_b_m1, nr_b_m2 = ',nr_b_m1,nr_b_m2
-!                     write (unit_nr, *) 'DEBUG: size of v1, v2 = ',size(v1),size(v2)
-!                     write (unit_nr, *) 'DEBUG: ir, ib = ',ir,ib
-!                     write (unit_nr, *) 'DEBUG: initial k, l = ',k,l
-!                     write (unit_nr, *) 'DEBUG: max k, l = ',MIN(ec%block(i)%n_ao, n_states(1)),MIN(ec%block(j)%n_ao, n_states(1))
-!                     write (unit_nr, *) 'DEBUG: ib, nc_m1 = ',ib,nc_m1
 
                      DO ix = 1, ib
                         blank_line = .FALSE.
                         DO ic = (ix - 1)*nc_m1 + 1, nc_m1*ix
-!                          write (unit_nr, *) 'DEBUG: initial ix,ic,k, l = ',ix,ic,k,l
    
                            IF (k <= MIN(ec%block(i)%n_ao, n_states(1)) .AND. &
                                l <= MIN(ec%block(j)%n_ao, n_states(1))) THEN
@@ -497,8 +490,7 @@ CONTAINS
                               WRITE (unit_nr, '(T3,I5,T13,I5,T22,E20.6)', ADVANCE='no') &
                                  k, l, v1(ic)*evolt*1000.0_dp
                               ! beta spin
-                              IF (SIZE(ec%block(i)%hab, 1) > 1 .AND. &
-                                  k <= n_states(2) .AND. l <= n_states(2)) &
+                              IF (n_spins > 1 .AND. k <= n_states(2) .AND. l <= n_states(2)) &
                                  WRITE (unit_nr, '(E20.6)', ADVANCE='no') v2(ic)*evolt*1000.0_dp
    
                               WRITE (unit_nr, *)
@@ -528,7 +520,8 @@ CONTAINS
 
                ! clean memory
                call cntxt_m1%gridexit()
-               call cntxt_m2%gridexit()
+               IF (n_spins > 1) &
+                  call cntxt_m2%gridexit()
    
                IF (ASSOCIATED(d1)) THEN
                   DEALLOCATE (d1)
