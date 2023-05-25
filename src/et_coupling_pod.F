@@ -519,7 +519,7 @@ CONTAINS
      
             ! Lowdin transformation matrices
             print *,'DEBUG: --> call pod_get_transf_mat'
-            CALL pod_get_transf_mat(qs_env, ec, mat_w)
+            CALL pod_get_transf_mat(output_unit, qs_env, ec, mat_w)
             ! KS Hamiltonian
             print *,'DEBUG: --> call pod_block_hamiltonian'
             CALL pod_block_hamiltonian(qs_env, ec, fm_s, mat_h, mat_w, n_ao, dft_cntrl%nspins)
@@ -532,14 +532,14 @@ CONTAINS
      
          ! Print out energies and couplings
          DO i = 1, ec%n_blocks
-            IF (master) THEN
+            IF (ASSOCIATED(ec%block(i)%mo)) THEN
                print *,'DEBUG: --> call pod_print_states'
                CALL pod_print_states(output_unit, ec%block(i)%mo, dft_cntrl%nspins, &
                                      'block '//TRIM(ADJUSTL(cp_to_string(i)))//' states', &
                                      mx_mo_a=mo(1)%nmo, mx_mo_b=mo(2)%nmo, fermi=.TRUE.)
+               print *,'DEBUG: --> call pod_print_state_fracs'
+               CALL pod_print_state_fracs(output_unit, qs_env, ec, i, dft_cntrl%nspins)
             END IF
-            print *,'DEBUG: --> call pod_print_state_fracs'
-            CALL pod_print_state_fracs(output_unit, qs_env, ec, i, dft_cntrl%nspins)
          END DO
     
          print *,'DEBUG: --> call pod_print_couplings'
@@ -585,7 +585,7 @@ CONTAINS
      
             ! Lowdin transformation matrices
             print *,'DEBUG: --> call pod_get_transf_mat'
-            CALL pod_get_transf_mat(qs_env, ec, mat_w)
+            CALL pod_get_transf_mat(output_unit, qs_env, ec, mat_w)
             ! KS Hamiltonian
             print *,'DEBUG: --> call pod_block_hamiltonian'
             CALL pod_block_hamiltonian(qs_env, ec, fm_s, mat_h, mat_w, &
@@ -599,14 +599,14 @@ CONTAINS
      
          ! Print out energies 
          DO i = 1, ec%n_blocks
-            IF (ASSOCIATED(ec%block(i)%mo) .AND. master) THEN
+            IF (ASSOCIATED(ec%block(i)%mo)) THEN
                print *,'DEBUG: --> call pod_print_states'
                CALL pod_print_states(output_unit, ec%block(i)%mo, dft_cntrl%nspins, &
                                      'block '//TRIM(ADJUSTL(cp_to_string(i)))//' states', &
                                      mx_mo_a=mo(1)%nmo, fermi=.TRUE.)
+               print *,'DEBUG: --> call pod_print_state_fracs'
+               CALL pod_print_state_fracs(output_unit, qs_env, ec, i, dft_cntrl%nspins)
             END IF
-            print *,'DEBUG: --> call pod_print_state_fracs'
-            CALL pod_print_state_fracs(output_unit, qs_env, ec, i, dft_cntrl%nspins)
          END DO
      
          ! Print out coupling elements

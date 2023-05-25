@@ -233,7 +233,7 @@ CONTAINS
       ! Working matrix
       print *,'DEBUG: --> call cp_fm_create'
       CALL cp_fm_create(matrix=mat_w, matrix_struct=mo%mo_coeff%matrix_struct, &
-                        name='BLOCK MO-TRANSFORMATION WORKING MATRIX')
+                        name='BLOCK MO-TRANSFORMATION WORK MATRIX')
       print *,'DEBUG: --> call cp_fm_set_all'
       CALL cp_fm_set_all(mat_w, 0.0_dp)
 

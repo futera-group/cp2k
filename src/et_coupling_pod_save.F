@@ -465,7 +465,7 @@ CONTAINS
 !> \brief save transformation matrix S^{+/-1/2} to binary data file
 !> \param qs_env QuickStep environment containing all system data
 !> \param ec electronic coupling data structure
-!> \param key 'F' for forward, 'B' for backward
+!> \param key 'F' for forward, 'R' for reverse
 !> \author Z. Futera (03.2019)
 ! **************************************************************************************************
    SUBROUTINE pod_save_transf_mat(qs_env, ec, key)
@@ -507,8 +507,8 @@ CONTAINS
 
          CALL cp_print_key_finished_output(unit_nr, logger, print_key, 'TRANSF_MATRIX_F')
 
-         ! Backward transformation matrix
-      ELSE IF (key == 'B') THEN
+      ! Reverse transformation matrix
+      ELSE IF (key == 'R') THEN
 
          unit_nr = cp_print_key_unit_nr(logger, print_key, 'TRANSF_MATRIX_R', &
                                         middle_name='RESTART', extension='.tmr', file_form='UNFORMATTED', &

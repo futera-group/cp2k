@@ -16,6 +16,7 @@ MODULE et_coupling_pod_utils
    USE cp_log_handling,                 ONLY: cp_logger_type
    USE cp_output_handling,              ONLY: cp_print_key_generate_filename
    USE dbcsr_api,                       ONLY: dbcsr_p_type
+   USE et_coupling_pod_save,            ONLY: pod_save_transf_mat
    USE et_coupling_pod_types,           ONLY: et_pod
    USE input_section_types,             ONLY: section_get_lval,&
                                               section_vals_get_subs_vals,&
@@ -40,14 +41,16 @@ CONTAINS
 
 ! **************************************************************************************************
 !> \brief calculated transformation matrix for basis-set orthogonalization (S^{-1/2})
+!> \param output_unit unit number of the open output stream
 !> \param qs_env QuickStep environment containing all system data
 !> \param ec electronic coupling data structure
 !> \param mat_w working matrix of the same dimension
 !> \author Z. Futera (02.2017)
 ! **************************************************************************************************
-   SUBROUTINE pod_get_transf_mat(qs_env, ec, mat_w)
+   SUBROUTINE pod_get_transf_mat(output_unit, qs_env, ec, mat_w)
 
       ! Routine arguments
+      INTEGER                                            :: output_unit
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(et_pod), POINTER                              :: ec
       TYPE(cp_fm_type)                                   :: mat_w
@@ -74,6 +77,10 @@ CONTAINS
       CALL get_qs_env(qs_env, matrix_s=mat_s, scf_control=scf_cntrl)
 
       ! Transformation S -> S^{-1/2}
+      IF (output_unit > 0) &
+         WRITE (output_unit, '(/,T3,A)') &
+         'Constructing forward basis-set transformation matrix'
+
       CPASSERT(.NOT. ASSOCIATED(ec%m_transf))
       print *,'DEBUG: --> allocate m_transf'
       ALLOCATE (ec%m_transf)
@@ -93,7 +100,14 @@ CONTAINS
                       "eigenvalues have been quenched.")
       END IF
 
+      ! Save the transformation matrix to file
+      CALL pod_save_transf_mat(qs_env, ec, 'F')
+
       ! Transformation S -> S^{+1/2}
+      IF (output_unit > 0) &
+         WRITE (output_unit, '(T3,A)') &
+         'Constructing reverse basis-set transformation matrix'
+
       CPASSERT(.NOT. ASSOCIATED(ec%m_transf_inv))
       print *,'DEBUG: --> allocate m_transf_inv'
       ALLOCATE (ec%m_transf_inv)
@@ -112,6 +126,9 @@ CONTAINS
                       "Overlap matrix exhibits linear dependencies. At least some "// &
                       "eigenvalues have been quenched.")
       END IF
+
+      ! Save the transformation matrix to file
+      CALL pod_save_transf_mat(qs_env, ec, 'R')
 
       ! Running time
       CALL timestop(handle)

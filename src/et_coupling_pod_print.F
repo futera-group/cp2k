@@ -297,6 +297,7 @@ CONTAINS
 
       ! Local variables
       CHARACTER(LEN=default_path_length)                 :: filename, my_pos, title
+      LOGICAL                                            :: do_print, has_cpl
       INTEGER                                            :: i, j, k, l, id, handle, n_spins, unit_nr
       INTEGER                                            :: n_states(2)
       TYPE(section_vals_type), POINTER                   :: print_key
@@ -347,9 +348,22 @@ CONTAINS
       print *,'DEBUG: --> call section_vals_get_subs_vals'
       print_key => section_vals_get_subs_vals(section_vals=ec_sec, &
                                               subsection_name="PRINT%COUPLING_ELEMENTS")
+      do_print = BTEST(cp_print_key_should_output(logger%iter_info, print_key), cp_p_file)
 
-      IF (BTEST(cp_print_key_should_output(logger%iter_info, print_key), &
-                cp_p_file)) THEN
+      ! Check whether we have any coupling values to print
+      has_cpl = .FALSE.
+      DO i = 1, ec%n_blocks
+        IF (ASSOCIATED(ec%block(i)%hab)) THEN
+           DO j = 1, ec%block(i)%n_hab_blocks
+             IF (ASSOCIATED(ec%block(i)%hab(1,j)%local_data)) THEN
+               has_cpl = .TRUE.
+               EXIT
+             END IF
+           END DO
+        END IF
+      END DO
+
+      IF (do_print .AND. has_cpl) THEN
 
          my_pos = "REWIND"
          IF (section_get_lval(print_key, "APPEND")) &
@@ -573,21 +587,19 @@ CONTAINS
    
                         IF (n_spins > 1) THEN
 
-                           WRITE (unit_nr, '(T3,I5,T13,I5,T22,E20.6)', ADVANCE='no') &
-                              k, l, &
+                           WRITE (unit_nr, '(T3,I5,T13,I5,T22,E20.6)', ADVANCE='no') k, l, &
                               ec%block(i)%hab(1, id)%local_data(k, l)*evolt*1000.0_dp
                            IF ((k <= n_states(2)) .AND. (l <= n_states(2))) THEN
                               WRITE (unit_nr, '(E20.6)') &
-                                 ec%block(i)%hab(2, id)%local_data(k, l)*evolt*1000.0_dp
+                                     ec%block(i)%hab(2, id)%local_data(k, l)*evolt*1000.0_dp
                            ELSE
                               WRITE (unit_nr, *)
                            END IF
    
                         ELSE
    
-                           WRITE (unit_nr, '(T3,I5,T13,I5,T22,E20.6)') &
-                              k, l, &
-                              ec%block(i)%hab(1, id)%local_data(k, l)*evolt*1000.0_dp
+                           WRITE (unit_nr, '(T3,I5,T13,I5,T22,E20.6)') k, l, &
+                                  ec%block(i)%hab(1, id)%local_data(k, l)*evolt*1000.0_dp
    
                         END IF
    

@@ -97,8 +97,10 @@ CONTAINS
 
       IF (ASSOCIATED(ec)) THEN
 
-         IF (ASSOCIATED(ec%fermi)) &
+         IF (ASSOCIATED(ec%fermi)) THEN
             DEALLOCATE (ec%fermi)
+            NULLIFY (ec%fermi)
+         END IF
          IF (ASSOCIATED(ec%m_transf)) THEN
             CALL cp_fm_release(matrix=ec%m_transf)
             DEALLOCATE (ec%m_transf)
