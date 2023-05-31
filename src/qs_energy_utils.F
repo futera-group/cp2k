@@ -78,8 +78,6 @@ CONTAINS
       TYPE(qs_energy_type), POINTER                      :: energy
       TYPE(section_vals_type), POINTER                   :: input, proj_section, rest_b_section, &
                                                             tip_scan_section
-      print *,'DEBUG: qs_energies_properties'
-
       NULLIFY (atprop, energy, pw_env)
       CALL timeset(routineN, handle)
 
@@ -111,14 +109,11 @@ CONTAINS
       END IF
 
       ! ET coupling - projection-operator approach
-      print *,'DEBUG: --> set proj_section'
       NULLIFY (proj_section)
       proj_section => &
          section_vals_get_subs_vals(qs_env%input, "PROPERTIES%ET_COUPLING%PROJECTION")
-      print *,'DEBUG: --> call section_vals_get'
       CALL section_vals_get(proj_section, explicit=do_et_proj)
       IF (do_et_proj) THEN
-         print *,'DEBUG: --> call pod_coupling_calc'
          CALL pod_coupling_calc(qs_env)
       END IF
 

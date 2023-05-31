@@ -69,22 +69,17 @@ CONTAINS
       ! Local variables
       INTEGER                                            :: unit_nr, handle
 
-      print *,'DEBUG: pod_read_restart_tmat'
-
       ! Time mark
       CALL timeset(routineN, handle)
 
       ! Memory allocation
       CPASSERT(.NOT. ASSOCIATED(mat))
-      print *,'DEBUG: --> allocate mat'
       ALLOCATE (mat)
       CPASSERT(ASSOCIATED(mat))
-      print *,'DEBUG: --> call cp_fm_create'
       CALL cp_fm_create(matrix=mat, matrix_struct=fm_s, &
                         name=desc//' TRANSFORMATION MATRIX')
 
       ! Open the file
-      print *,'DEBUG: --> call open_file'
       CALL open_file(file_name=filename, &
                      file_action="READ", &
                      file_form="UNFORMATTED", &
@@ -92,11 +87,9 @@ CONTAINS
                      unit_number=unit_nr)
 
       ! Read the matrix elements
-      print *,'DEBUG: --> call cp_fm_read_unformatted'
       CALL cp_fm_read_unformatted(mat, unit_nr)
 
       ! Close the file
-      print *,'DEBUG: --> call close_file'
       IF (unit_nr > 0) &
          CALL close_file(unit_nr)
 
@@ -348,26 +341,19 @@ CONTAINS
       INTEGER                                            :: handle
       TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:)        :: mat_h
 
-      print *,'DEBUG: pod_read_restart_data'
-
       ! Time mark
       CALL timeset(routineN, handle)
 
       ! Transformation matrices for Lowdin orthogonalization
-      print *,'DEBUG: --> file_tmf = ',trim(adjustl(file_tmf))
-      print *,'DEBUG: --> file_tmr = ',trim(adjustl(file_tmr))
       IF (file_tmf /= '' .and. file_tmr /= '') THEN
 
          ! Read the matrices from TMF and TMR restart files
-         print *,'DEBUG: --> call pod_read_restart_tmat'
          CALL pod_read_restart_tmat(ec%m_transf, fm_s, 'S^(-1/2)', file_tmf)
-         print *,'DEBUG: --> call pod_read_restart_tmat'
          CALL pod_read_restart_tmat(ec%m_transf_inv, fm_s, 'S^(+1/2)', file_tmr)
 
       ELSE
 
          ! Calculate the matrix elements from the overlap matrix
-         print *,'DEBUG: --> call pod_get_transf_mat'
          CALL pod_get_transf_mat(output_unit, qs_env, ec, mat_w)
 
       END IF
@@ -375,27 +361,21 @@ CONTAINS
       ! Hamiltonian blocks
       IF (blocks) THEN
 
-         print *,'DEBUG: --> call pod_block_diag'
          CALL pod_block_diag(output_unit, qs_env, ec, mat_h, n_spins, .TRUE., blocks)
 
       ! Full Hamiltonian
       ELSE
 
          ! Coupling elements and wavefunctions
-         print *,'DEBUG: --> file_hab = ',trim(adjustl(file_hab))
-         print *,'DEBUG: --> file_wfn = ',trim(adjustl(file_wfn))
          IF (file_hab /= '' .and. file_wfn /= '') THEN
  
             ! Read data from HAB and WFN restart files
-            print *,'DEBUG: --> call pod_read_restart_cpl'
             CALL pod_read_restart_cpl(qs_env, ec, n_spins, file_hab, file_wfn)
  
          ELSE
  
             ! Calculate data from KS Hamiltonian
-            print *,'DEBUG: --> call pod_block_hamiltonian'
             CALL pod_block_hamiltonian(qs_env, ec, fm_s, mat_h, mat_w, n_ao, n_spins)
-            print *,'DEBUG: --> call pod_block_diag'
             CALL pod_block_diag(output_unit, qs_env, ec, mat_h, n_spins, .TRUE., blocks)
  
          END IF

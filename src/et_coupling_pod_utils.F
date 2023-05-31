@@ -64,8 +64,6 @@ CONTAINS
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: mat_s
       TYPE(scf_control_type), POINTER                    :: scf_cntrl
 
-      print *,'DEBUG: pod_get_transf_mat'
-
       ! Time mark
       CALL timeset(routineN, handle)
 
@@ -73,7 +71,6 @@ CONTAINS
       NULLIFY (mat_s)
       NULLIFY (scf_cntrl)
 
-      print *,'DEBUG: --> call get_qs_env'
       CALL get_qs_env(qs_env, matrix_s=mat_s, scf_control=scf_cntrl)
 
       ! Transformation S -> S^{-1/2}
@@ -82,15 +79,11 @@ CONTAINS
          'Constructing forward basis-set transformation matrix'
 
       CPASSERT(.NOT. ASSOCIATED(ec%m_transf))
-      print *,'DEBUG: --> allocate m_transf'
       ALLOCATE (ec%m_transf)
       CPASSERT(ASSOCIATED(ec%m_transf))
-      print *,'DEBUG: --> call cp_fm_create'
       CALL cp_fm_create(matrix=ec%m_transf, matrix_struct=mat_w%matrix_struct, &
                         name='S^(-1/2) TRANSFORMATION MATRIX')
-      print *,'DEBUG: --> call copy_dbcsr_to_fm'
       CALL copy_dbcsr_to_fm(mat_s(1)%matrix, ec%m_transf)
-      print *,'DEBUG: --> call cp_fm_power'
       CALL cp_fm_power(ec%m_transf, mat_w, -0.5_dp, scf_cntrl%eps_eigval, n_deps)
 
       ! Sanity check
@@ -109,15 +102,11 @@ CONTAINS
          'Constructing reverse basis-set transformation matrix'
 
       CPASSERT(.NOT. ASSOCIATED(ec%m_transf_inv))
-      print *,'DEBUG: --> allocate m_transf_inv'
       ALLOCATE (ec%m_transf_inv)
       CPASSERT(ASSOCIATED(ec%m_transf_inv))
-      print *,'DEBUG: --> call cp_fm_create'
       CALL cp_fm_create(matrix=ec%m_transf_inv, matrix_struct=mat_w%matrix_struct, &
                        name='S^(+1/2) TRANSFORMATION MATRIX')
-      print *,'DEBUG: --> call copy_dbcsr_to_fm'
       CALL copy_dbcsr_to_fm(mat_s(1)%matrix, ec%m_transf_inv)
-      print *,'DEBUG: --> call cp_fm_power'
       CALL cp_fm_power(ec%m_transf_inv, mat_w, +0.5_dp, scf_cntrl%eps_eigval, n_deps)
 
       ! Sanity check

@@ -320,10 +320,7 @@ CONTAINS
       INTEGER, EXTERNAL                                  :: numroc
 #endif
 
-      print *,'DEBUG: pod_print_couplings'
-
       ! Time mark
-      print *,'DEBUG: --> call timeset'
       CALL timeset(routineN, handle)
 
 #if defined(__SCALAPACK)
@@ -340,12 +337,9 @@ CONTAINS
       DO i = 1, SIZE(mo)
          n_states(i) = mo(i)%nmo
       END DO
-      print *,'DEBUG: --> n_states = ',n_states
       n_spins = 1
       IF (n_states(2) > 0) n_spins = 2
-      print *,'DEBUG: --> n_spins = ',n_spins
 
-      print *,'DEBUG: --> call section_vals_get_subs_vals'
       print_key => section_vals_get_subs_vals(section_vals=ec_sec, &
                                               subsection_name="PRINT%COUPLING_ELEMENTS")
       do_print = BTEST(cp_print_key_should_output(logger%iter_info, print_key), cp_p_file)
@@ -368,7 +362,6 @@ CONTAINS
          my_pos = "REWIND"
          IF (section_get_lval(print_key, "APPEND")) &
             my_pos = "APPEND"
-         print *,'DEBUG: --> my_pos = ',trim(adjustl(my_pos))
 
          ! Header
          IF (output_unit > 0) &
@@ -447,19 +440,16 @@ CONTAINS
    
                   ! Number of rows in the block
                   ib = MIN(nr_b_m1, nr_m1 - ir + 1)
-                  if (output_unit > 0) print *,'DEBUG: (1) ir, ib = ',ir,ib
    
                   ! Transfer alpha-spin data
                   CALL infog2l(ir, 1, desc_m1, cntxt_m1%num_pe(1), cntxt_m1%num_pe(2), &
                                cntxt_m1%mepos(1), cntxt_m1%mepos(2), ir_l_m1, ic_l_m1, pr_m1, pc_m1)
                   IF (pr_m1 == cntxt_m1%mepos(1)) THEN
-                     if (output_unit > 0) print *,'DEBUG: fill the v1 array'
                      DO ix = 1, ib
                         v1((ix - 1)*nc_m1 + 1:nc_m1*ix) = d1(ir_l_m1 + ix - 1, :)
                      END DO
                   END IF
                   IF (pr_m1 /= 0) THEN
-                     if (output_unit > 0) print *,'DEBUG: send/receive v1 data'
                      IF (pr_m1 == cntxt_m1%mepos(1)) &
                         CALL para_m1%send(v1(:), 0, tag_m1)
                      IF (cntxt_m1%mepos(1) == 0) &
@@ -471,13 +461,11 @@ CONTAINS
                      CALL infog2l(ir, 1, desc_m2, cntxt_m2%num_pe(1), cntxt_m2%num_pe(2), &
                                   cntxt_m2%mepos(1), cntxt_m2%mepos(2), ir_l_m2, ic_l_m2, pr_m2, pc_m2)
                      IF (pr_m2 == cntxt_m2%mepos(1)) THEN
-                        if (output_unit > 0) print *,'DEBUG: fill the v2 array'
                         DO ix = 1, ib
                            v2((ix - 1)*nc_m2 + 1:nc_m2*ix) = d2(ir_l_m2 + ix - 1, :)
                         END DO
                      END IF
                      IF (pr_m2 /= 0) THEN
-                        if (output_unit > 0) print *,'DEBUG: send/receive v2 data'
                         IF (pr_m2 == cntxt_m2%mepos(1)) &
                            CALL para_m2%send(v2(:), 0, tag_m2)
                         IF (cntxt_m2%mepos(1) == 0) &
@@ -485,14 +473,8 @@ CONTAINS
                      END IF
                   END IF
 
-                  if (output_unit > 0) print *,'DEBUG: (2) ir, ib = ',ir,ib
-   
                   ! Output
                   IF (output_unit > 0) THEN
-
-                     print *,'DEBUG: (3) ir, ib = ',ir,ib
-
-                     print *,'DEBUG: (4) ir, ib = ',ir,ib
 
                      DO ix = 1, ib
                         blank_line = .FALSE.
@@ -569,7 +551,6 @@ CONTAINS
                DO j = i + 1, ec%n_blocks
 
                   WRITE (filename, '(A5,I1.1,A1,I1.1)') "ET_BL_", i, "-", j
-                  print *,'DEBUG: --> call cp_print_key_unit_nr'
                   unit_nr = cp_print_key_unit_nr(logger, ec_sec, "PRINT%COUPLING_ELEMENTS", &
                                         extension=".elcoup", middle_name=TRIM(filename), &
                                         file_position=my_pos, log_filename=.FALSE.)
@@ -608,7 +589,6 @@ CONTAINS
                      WRITE (unit_nr, *)
                   END DO
 
-                  print *,'DEBUG: --> call cp_print_key_finished_output'
                   CALL cp_print_key_finished_output(unit_nr, logger, &
                          ec_sec, "PRINT%COUPLING_ELEMENTS")
 
@@ -624,7 +604,6 @@ CONTAINS
       END IF
 
       ! Running time
-      print *,'DEBUG: --> call timestop'
       CALL timestop(handle)
 
    END SUBROUTINE pod_print_couplings
